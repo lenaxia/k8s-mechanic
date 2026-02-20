@@ -18,8 +18,9 @@ the epic and individual story files for each unit of work.
 | Epic | Folder | Description | Depends On | Status |
 |------|--------|-------------|------------|--------|
 | epic00 — Foundation | [epic00-foundation/](epic00-foundation/) | Go module, project structure, config, CI skeleton | — | Not Started |
-| epic01 — Controller | [epic01-controller/](epic01-controller/) | Result CRD watcher, reconciler, fingerprint logic | epic00 | Not Started |
-| epic02 — Job Builder | [epic02-jobbuilder/](epic02-jobbuilder/) | Agent Job spec construction | epic01 | Not Started |
+| epic00.1 — Interfaces | [epic00.1-interfaces/](epic00.1-interfaces/) | Shared interfaces, domain types, fakes, envtest suite | epic00 | Not Started |
+| epic01 — Controller | [epic01-controller/](epic01-controller/) | Result CRD watcher, reconciler, fingerprint logic | epic00, epic00.1 | Not Started |
+| epic02 — Job Builder | [epic02-jobbuilder/](epic02-jobbuilder/) | Agent Job spec construction | epic00.1, epic01 | Not Started |
 | epic03 — Agent Image | [epic03-agent-image/](epic03-agent-image/) | Dockerfile, tool install, entrypoint script | epic00 | Not Started |
 | epic04 — Deploy | [epic04-deploy/](epic04-deploy/) | Kustomize manifests, RBAC, Secrets | epic01, epic02, epic03 | Not Started |
 | epic05 — Prompt | [epic05-prompt/](epic05-prompt/) | OpenCode prompt design and ConfigMap | epic04 | Not Started |
@@ -30,11 +31,13 @@ the epic and individual story files for each unit of work.
 
 ```
 epic00-foundation
-    ├── epic01-controller
-    │         └── epic02-jobbuilder
-    │                     └── epic04-deploy ──┐
-    ├── epic03-agent-image ──────────────────┤
-    │                                         └── epic05-prompt
+    ├── epic00.1-interfaces
+    │       ├── epic01-controller
+    │       │         └── epic02-jobbuilder
+    │       │                     └── epic04-deploy ──┐
+    │       └── (fakes used by epic01 unit tests)     │
+    ├── epic03-agent-image ──────────────────────────┤
+    │                                                  └── epic05-prompt
     └── epic06-ci-cd (parallel with epic01+)
 ```
 

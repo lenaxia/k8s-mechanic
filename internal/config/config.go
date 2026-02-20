@@ -1,0 +1,65 @@
+package config
+
+import (
+	"fmt"
+	"os"
+	"strconv"
+)
+
+// Config holds all runtime configuration for the mendabot-watcher controller.
+// All fields are populated from environment variables at startup via FromEnv.
+type Config struct {
+	GitOpsRepo         string // GITOPS_REPO — required
+	GitOpsManifestRoot string // GITOPS_MANIFEST_ROOT — required
+	AgentImage         string // AGENT_IMAGE — required
+	AgentNamespace     string // AGENT_NAMESPACE — required; must equal watcher namespace
+	AgentSA            string // AGENT_SA — required
+	LogLevel           string // LOG_LEVEL — default "info"
+	MaxConcurrentJobs  int    // MAX_CONCURRENT_JOBS — default 3
+}
+
+// FromEnv reads configuration from environment variables and returns a Config.
+// Missing required variables or invalid values cause a descriptive error.
+func FromEnv() (Config, error) {
+	cfg := Config{}
+
+	required := []struct {
+		name string
+		dest *string
+	}{
+		{"GITOPS_REPO", &cfg.GitOpsRepo},
+		{"GITOPS_MANIFEST_ROOT", &cfg.GitOpsManifestRoot},
+		{"AGENT_IMAGE", &cfg.AgentImage},
+		{"AGENT_NAMESPACE", &cfg.AgentNamespace},
+		{"AGENT_SA", &cfg.AgentSA},
+	}
+
+	for _, r := range required {
+		val := os.Getenv(r.name)
+		if val == "" {
+			return Config{}, fmt.Errorf("required environment variable %s is not set", r.name)
+		}
+		*r.dest = val
+	}
+
+	cfg.LogLevel = os.Getenv("LOG_LEVEL")
+	if cfg.LogLevel == "" {
+		cfg.LogLevel = "info"
+	}
+
+	maxJobsStr := os.Getenv("MAX_CONCURRENT_JOBS")
+	if maxJobsStr == "" {
+		cfg.MaxConcurrentJobs = 3
+	} else {
+		n, err := strconv.Atoi(maxJobsStr)
+		if err != nil {
+			return Config{}, fmt.Errorf("MAX_CONCURRENT_JOBS must be an integer: %w", err)
+		}
+		if n <= 0 {
+			return Config{}, fmt.Errorf("MAX_CONCURRENT_JOBS must be a positive integer, got %d", n)
+		}
+		cfg.MaxConcurrentJobs = n
+	}
+
+	return cfg, nil
+}

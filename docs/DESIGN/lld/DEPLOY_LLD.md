@@ -1,0 +1,402 @@
+# Domain: Deployment & RBAC — Low-Level Design
+
+**Version:** 1.1
+**Date:** 2026-02-19
+**Status:** Implementation Ready
+**HLD Reference:** [Sections 7, 13](../HLD.md)
+
+---
+
+## 1. Overview
+
+### 1.1 Purpose
+
+Defines every Kubernetes resource needed to run the mendabot-watcher and mendabot-agent
+in a cluster. All resources are managed via Kustomize in `deploy/kustomize/`.
+
+### 1.2 Design Principles
+
+- **Least privilege** — watcher and agent have only the permissions they actually need
+- **Namespace isolation** — all workloads run in `mendabot-watcher`; agent Jobs are also
+  created in this namespace
+- **No secrets committed** — secret manifests in the repo are placeholders only; real
+  values are applied out-of-band or via Sealed Secrets / SOPS
+- **Flux compatible** — the kustomize directory can be referenced directly from a Flux
+  `Kustomization` resource
+
+---
+
+## 2. Namespace
+
+```yaml
+# namespace.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mendabot-watcher
+```
+
+---
+
+## 3. ServiceAccounts
+
+### 3.1 mendabot-watcher
+
+```yaml
+# serviceaccount-watcher.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mendabot-watcher
+  namespace: mendabot
+```
+
+### 3.2 mendabot-agent
+
+```yaml
+# serviceaccount-agent.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mendabot-agent
+  namespace: mendabot
+```
+
+---
+
+## 4. RBAC — Watcher
+
+### 4.1 ClusterRole (read Result CRDs and Namespaces)
+
+```yaml
+# clusterrole-watcher.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: mendabot-watcher
+rules:
+- apiGroups: ["core.k8sgpt.ai"]
+  resources: ["results"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["namespaces"]
+  verbs: ["get", "list"]
+```
+
+### 4.2 ClusterRoleBinding
+
+```yaml
+# clusterrolebinding-watcher.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: mendabot-watcher
+subjects:
+- kind: ServiceAccount
+  name: mendabot-watcher
+  namespace: mendabot
+roleRef:
+  kind: ClusterRole
+  name: mendabot-watcher
+  apiGroup: rbac.authorization.k8s.io
+```
+
+### 4.3 Role (create Jobs and read pods in own namespace)
+
+```yaml
+# role-watcher.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: mendabot-watcher
+  namespace: mendabot
+rules:
+- apiGroups: ["batch"]
+  resources: ["jobs"]
+  verbs: ["get", "list", "create", "watch", "delete"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list"]
+```
+
+### 4.4 RoleBinding
+
+```yaml
+# rolebinding-watcher.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: mendabot-watcher
+  namespace: mendabot
+subjects:
+- kind: ServiceAccount
+  name: mendabot-watcher
+  namespace: mendabot
+roleRef:
+  kind: Role
+  name: mendabot-watcher
+  apiGroup: rbac.authorization.k8s.io
+```
+
+---
+
+## 5. RBAC — Agent
+
+The agent needs cluster-wide read access for investigation. This mirrors the permissions
+already granted to the k8sgpt Deployment by its own Helm chart.
+
+### 5.1 ClusterRole
+
+```yaml
+# clusterrole-agent.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: mendabot-agent
+rules:
+- apiGroups: ["*"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch"]
+```
+
+The agent ClusterRole explicitly omits all mutating verbs: `create`, `update`, `patch`,
+`delete`, `deletecollection`, `apply`, `escalate`, `bind`, `impersonate`.
+`describe` is not a Kubernetes API verb (it is implemented client-side by kubectl) and
+must not appear in RBAC rules.
+
+### 5.2 ClusterRoleBinding
+
+```yaml
+# clusterrolebinding-agent.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: mendabot-agent
+subjects:
+- kind: ServiceAccount
+  name: mendabot-agent
+  namespace: mendabot
+roleRef:
+  kind: ClusterRole
+  name: mendabot-agent
+  apiGroup: rbac.authorization.k8s.io
+```
+
+---
+
+## 6. Secrets (Placeholders)
+
+These files contain only the structure — no real values. They must be filled out of band
+before applying the manifests. They should never contain real values in git.
+
+### 6.1 github-app
+
+```yaml
+# secret-github-app.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: github-app
+  namespace: mendabot
+type: Opaque
+stringData:
+  app-id: "REPLACE_ME"
+  installation-id: "REPLACE_ME"
+  private-key: |
+    REPLACE_ME
+```
+
+### 6.2 llm-credentials
+
+```yaml
+# secret-llm.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: llm-credentials
+  namespace: mendabot
+type: Opaque
+stringData:
+  api-key: "REPLACE_ME"
+  base-url: ""      # leave empty for OpenAI default
+  model: ""         # leave empty to use OpenCode's default
+```
+
+---
+
+## 6.3 Required GitHub Label
+
+The agent applies the label `needs-human-review` to low-confidence PRs. This label must
+be created in the target GitOps repository before the agent runs. It is a one-time manual
+setup step:
+
+```bash
+gh label create needs-human-review \
+  --repo lenaxia/talos-ops-prod \
+  --description "PR opened by mendabot-agent requires human review before merge" \
+  --color "e11d48"
+```
+
+If this label does not exist when the agent runs `gh pr edit --add-label`, the command
+will fail non-fatally — the PR will still exist, but without the label. The agent will
+not retry the label addition.
+
+---
+
+## 7. ConfigMap — Prompt
+
+The prompt template is stored in a ConfigMap and mounted into the agent Job at `/prompt/prompt.txt`.
+See [PROMPT_LLD.md](PROMPT_LLD.md) for the full prompt content.
+
+```yaml
+# configmap-prompt.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opencode-prompt
+  namespace: mendabot
+data:
+  prompt.txt: |
+    <see PROMPT_LLD.md for content>
+```
+
+---
+
+## 8. Watcher Deployment
+
+```yaml
+# deployment-watcher.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mendabot-watcher
+  namespace: mendabot
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mendabot-watcher
+  template:
+    metadata:
+      labels:
+        app: mendabot-watcher
+    spec:
+      serviceAccountName: mendabot-watcher
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: watcher
+        image: ghcr.io/lenaxia/mendabot-watcher:latest
+        env:
+        - name: GITOPS_REPO
+          value: "lenaxia/talos-ops-prod"
+        - name: GITOPS_MANIFEST_ROOT
+          value: "kubernetes"
+        - name: AGENT_IMAGE
+          value: "ghcr.io/lenaxia/mendabot-agent:latest"
+        - name: AGENT_NAMESPACE
+          value: "mendabot"  # must equal the watcher's own namespace
+        - name: AGENT_SA
+          value: "mendabot-agent"
+        - name: LOG_LEVEL
+          value: "info"
+        - name: MAX_CONCURRENT_JOBS
+          value: "3"
+        ports:
+        - name: metrics
+          containerPort: 8080
+        - name: healthz
+          containerPort: 8081
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8081
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+```
+
+---
+
+## 9. Kustomization
+
+```yaml
+# kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+- namespace.yaml
+- serviceaccount-watcher.yaml
+- serviceaccount-agent.yaml
+- clusterrole-watcher.yaml
+- clusterrole-agent.yaml
+- clusterrolebinding-watcher.yaml
+- clusterrolebinding-agent.yaml
+- role-watcher.yaml
+- rolebinding-watcher.yaml
+- configmap-prompt.yaml
+- secret-github-app.yaml
+- secret-llm.yaml
+- deployment-watcher.yaml
+```
+
+---
+
+## 10. Flux Integration
+
+To deploy via Flux from the GitOps repo, add to `lenaxia/talos-ops-prod`:
+
+```yaml
+# kubernetes/apps/mendabot/ks.yaml
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: mendabot-watcher
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./deploy/kustomize
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: k8sgpt-mendabot   # GitRepository pointing at this repo
+  dependsOn:
+  - name: k8sgpt-operator          # ensure operator is deployed first
+```
+
+---
+
+## 11. Applying Manually
+
+```bash
+# Dry run first
+kubectl apply -k deploy/kustomize/ --dry-run=client
+
+# Apply
+kubectl apply -k deploy/kustomize/
+
+# Verify
+kubectl -n mendabot get all
+kubectl -n mendabot get clusterrole mendabot-watcher mendabot-agent
+```

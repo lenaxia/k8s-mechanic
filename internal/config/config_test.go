@@ -1,0 +1,176 @@
+package config_test
+
+import (
+	"testing"
+
+	"github.com/lenaxia/k8sgpt-mendabot/internal/config"
+)
+
+func TestFromEnv_AllFieldsPresent(t *testing.T) {
+	t.Setenv("GITOPS_REPO", "https://github.com/org/repo.git")
+	t.Setenv("GITOPS_MANIFEST_ROOT", "kubernetes/")
+	t.Setenv("AGENT_IMAGE", "ghcr.io/lenaxia/mendabot-agent:latest")
+	t.Setenv("AGENT_NAMESPACE", "mendabot")
+	t.Setenv("AGENT_SA", "mendabot-agent")
+	t.Setenv("LOG_LEVEL", "debug")
+	t.Setenv("MAX_CONCURRENT_JOBS", "5")
+
+	cfg, err := config.FromEnv()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.GitOpsRepo != "https://github.com/org/repo.git" {
+		t.Errorf("GitOpsRepo: got %q, want %q", cfg.GitOpsRepo, "https://github.com/org/repo.git")
+	}
+	if cfg.GitOpsManifestRoot != "kubernetes/" {
+		t.Errorf("GitOpsManifestRoot: got %q, want %q", cfg.GitOpsManifestRoot, "kubernetes/")
+	}
+	if cfg.AgentImage != "ghcr.io/lenaxia/mendabot-agent:latest" {
+		t.Errorf("AgentImage: got %q, want %q", cfg.AgentImage, "ghcr.io/lenaxia/mendabot-agent:latest")
+	}
+	if cfg.AgentNamespace != "mendabot" {
+		t.Errorf("AgentNamespace: got %q, want %q", cfg.AgentNamespace, "mendabot")
+	}
+	if cfg.AgentSA != "mendabot-agent" {
+		t.Errorf("AgentSA: got %q, want %q", cfg.AgentSA, "mendabot-agent")
+	}
+	if cfg.LogLevel != "debug" {
+		t.Errorf("LogLevel: got %q, want %q", cfg.LogLevel, "debug")
+	}
+	if cfg.MaxConcurrentJobs != 5 {
+		t.Errorf("MaxConcurrentJobs: got %d, want %d", cfg.MaxConcurrentJobs, 5)
+	}
+}
+
+func TestFromEnv_Defaults(t *testing.T) {
+	t.Setenv("GITOPS_REPO", "https://github.com/org/repo.git")
+	t.Setenv("GITOPS_MANIFEST_ROOT", "kubernetes/")
+	t.Setenv("AGENT_IMAGE", "ghcr.io/lenaxia/mendabot-agent:latest")
+	t.Setenv("AGENT_NAMESPACE", "mendabot")
+	t.Setenv("AGENT_SA", "mendabot-agent")
+	t.Unsetenv("LOG_LEVEL")
+	t.Unsetenv("MAX_CONCURRENT_JOBS")
+
+	cfg, err := config.FromEnv()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.LogLevel != "info" {
+		t.Errorf("LogLevel default: got %q, want %q", cfg.LogLevel, "info")
+	}
+	if cfg.MaxConcurrentJobs != 3 {
+		t.Errorf("MaxConcurrentJobs default: got %d, want %d", cfg.MaxConcurrentJobs, 3)
+	}
+}
+
+func TestFromEnv_MissingRequiredFields(t *testing.T) {
+	tests := []struct {
+		name    string
+		unsetFn func()
+	}{
+		{
+			name: "missing GITOPS_REPO",
+			unsetFn: func() {
+				t.Setenv("GITOPS_MANIFEST_ROOT", "kubernetes/")
+				t.Setenv("AGENT_IMAGE", "ghcr.io/lenaxia/mendabot-agent:latest")
+				t.Setenv("AGENT_NAMESPACE", "mendabot")
+				t.Setenv("AGENT_SA", "mendabot-agent")
+				t.Unsetenv("GITOPS_REPO")
+			},
+		},
+		{
+			name: "missing GITOPS_MANIFEST_ROOT",
+			unsetFn: func() {
+				t.Setenv("GITOPS_REPO", "https://github.com/org/repo.git")
+				t.Setenv("AGENT_IMAGE", "ghcr.io/lenaxia/mendabot-agent:latest")
+				t.Setenv("AGENT_NAMESPACE", "mendabot")
+				t.Setenv("AGENT_SA", "mendabot-agent")
+				t.Unsetenv("GITOPS_MANIFEST_ROOT")
+			},
+		},
+		{
+			name: "missing AGENT_IMAGE",
+			unsetFn: func() {
+				t.Setenv("GITOPS_REPO", "https://github.com/org/repo.git")
+				t.Setenv("GITOPS_MANIFEST_ROOT", "kubernetes/")
+				t.Setenv("AGENT_NAMESPACE", "mendabot")
+				t.Setenv("AGENT_SA", "mendabot-agent")
+				t.Unsetenv("AGENT_IMAGE")
+			},
+		},
+		{
+			name: "missing AGENT_NAMESPACE",
+			unsetFn: func() {
+				t.Setenv("GITOPS_REPO", "https://github.com/org/repo.git")
+				t.Setenv("GITOPS_MANIFEST_ROOT", "kubernetes/")
+				t.Setenv("AGENT_IMAGE", "ghcr.io/lenaxia/mendabot-agent:latest")
+				t.Setenv("AGENT_SA", "mendabot-agent")
+				t.Unsetenv("AGENT_NAMESPACE")
+			},
+		},
+		{
+			name: "missing AGENT_SA",
+			unsetFn: func() {
+				t.Setenv("GITOPS_REPO", "https://github.com/org/repo.git")
+				t.Setenv("GITOPS_MANIFEST_ROOT", "kubernetes/")
+				t.Setenv("AGENT_IMAGE", "ghcr.io/lenaxia/mendabot-agent:latest")
+				t.Setenv("AGENT_NAMESPACE", "mendabot")
+				t.Unsetenv("AGENT_SA")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.unsetFn()
+			_, err := config.FromEnv()
+			if err == nil {
+				t.Fatalf("expected error for %s, got nil", tt.name)
+			}
+		})
+	}
+}
+
+func TestFromEnv_InvalidMaxConcurrentJobs(t *testing.T) {
+	t.Setenv("GITOPS_REPO", "https://github.com/org/repo.git")
+	t.Setenv("GITOPS_MANIFEST_ROOT", "kubernetes/")
+	t.Setenv("AGENT_IMAGE", "ghcr.io/lenaxia/mendabot-agent:latest")
+	t.Setenv("AGENT_NAMESPACE", "mendabot")
+	t.Setenv("AGENT_SA", "mendabot-agent")
+	t.Setenv("MAX_CONCURRENT_JOBS", "not-a-number")
+
+	_, err := config.FromEnv()
+	if err == nil {
+		t.Fatal("expected error for invalid MAX_CONCURRENT_JOBS, got nil")
+	}
+}
+
+func TestFromEnv_ZeroMaxConcurrentJobs(t *testing.T) {
+	t.Setenv("GITOPS_REPO", "https://github.com/org/repo.git")
+	t.Setenv("GITOPS_MANIFEST_ROOT", "kubernetes/")
+	t.Setenv("AGENT_IMAGE", "ghcr.io/lenaxia/mendabot-agent:latest")
+	t.Setenv("AGENT_NAMESPACE", "mendabot")
+	t.Setenv("AGENT_SA", "mendabot-agent")
+	t.Setenv("MAX_CONCURRENT_JOBS", "0")
+
+	_, err := config.FromEnv()
+	if err == nil {
+		t.Fatal("expected error for MAX_CONCURRENT_JOBS=0, got nil")
+	}
+}
+
+func TestFromEnv_NegativeMaxConcurrentJobs(t *testing.T) {
+	t.Setenv("GITOPS_REPO", "https://github.com/org/repo.git")
+	t.Setenv("GITOPS_MANIFEST_ROOT", "kubernetes/")
+	t.Setenv("AGENT_IMAGE", "ghcr.io/lenaxia/mendabot-agent:latest")
+	t.Setenv("AGENT_NAMESPACE", "mendabot")
+	t.Setenv("AGENT_SA", "mendabot-agent")
+	t.Setenv("MAX_CONCURRENT_JOBS", "-1")
+
+	_, err := config.FromEnv()
+	if err == nil {
+		t.Fatal("expected error for MAX_CONCURRENT_JOBS=-1, got nil")
+	}
+}

@@ -1,0 +1,594 @@
+# k8sgpt-mendabot — LLM Implementation Guide
+
+**Version:** 1.0
+**Last Updated:** 2026-02-19
+**Project Status:** Active Development — Design Phase
+
+---
+
+## Table of Contents
+
+1. [Project Overview](#project-overview)
+2. [Critical Guidelines & Hard Rules](#critical-guidelines--hard-rules)
+3. [Repository Structure](#repository-structure)
+4. [Architecture Overview](#architecture-overview)
+5. [Technology Stack](#technology-stack)
+6. [Worklog Requirements](#worklog-requirements)
+7. [Development Workflow](#development-workflow)
+8. [Common Commands](#common-commands)
+9. [Branch Management](#branch-management)
+10. [Testing Requirements](#testing-requirements)
+
+---
+
+## Project Overview
+
+**k8sgpt-mendabot** watches `Result` CRDs written by the
+[k8sgpt-operator](https://github.com/k8sgpt-ai/k8sgpt-operator), deduplicates findings by
+parent resource, and spawns a per-finding Kubernetes Job that runs an
+[OpenCode](https://opencode.ai) agent in-cluster. The agent investigates the live cluster
+and the GitOps repository, then opens a pull request with a proposed fix.
+
+**Core principles:**
+- One PR per unique finding, deduplicated by parent resource + error fingerprint
+- Strictly read-only cluster access for the investigation agent
+- No direct commits to the GitOps repo's default branch — PRs only
+- In-memory deduplication (no external state store)
+- Self-contained Kubernetes deployment via Kustomize, compatible with Flux GitOps
+
+**Two deliverables:**
+1. `mendabot-watcher` — Go controller binary (controller-runtime)
+2. `mendabot-agent` — Docker image (opencode + kubectl + k8sgpt + helm + flux + gh)
+
+**Upstream target:** Once stable, contribute to
+[k8sgpt-ai/k8sgpt-operator](https://github.com/k8sgpt-ai/k8sgpt-operator).
+
+**Primary source documents:**
+- [`docs/DESIGN/HLD.md`](docs/DESIGN/HLD.md) — Authoritative specification
+- [`docs/DESIGN/lld/`](docs/DESIGN/lld/) — Low-level designs (5 modules)
+- [`docs/BACKLOG/`](docs/BACKLOG/) — Epics and user stories
+- [`docs/WORKLOGS/`](docs/WORKLOGS/) — Session worklogs
+
+---
+
+## Critical Guidelines & Hard Rules
+
+### 0. Test Driven Development (TDD)
+
+**MANDATORY:** Write tests BEFORE writing functional code. Always.
+
+```
+Correct workflow:
+1. Write test
+2. Run test (must fail)
+3. Write minimal code to pass
+4. Run test (must pass)
+5. Refactor if needed
+```
+
+**Test requirements:**
+- Multiple happy path tests
+- Multiple unhappy path tests
+- Edge case coverage
+- Always use `-timeout` when running tests
+- Tests must pass before marking work complete
+
+### 1. Type Safety First
+
+**Always:**
+- Define strongly-typed structs for all data structures
+- Create domain types for related fields
+
+**Never:**
+- Use `map[string]interface{}` for structured data
+- Use `interface{}` when the type is known
+- Pass untyped data between functions
+
+Maps are acceptable only when parsing external JSON/YAML with unknown structure —
+and even then, convert to a typed struct immediately.
+
+### 2. Idiomatic Go
+
+- Follow Go conventions throughout
+- Use `(value, error)` multiple return pattern
+- Avoid global state
+- Create custom error types for domain-specific errors
+- Prefer minimal concurrency; add it only when there is clear, measurable benefit
+
+### 3. Explicit Over Implicit
+
+- Explicit error handling — no swallowed errors
+- Explicit type declarations
+- No magic or hidden behaviour
+
+### 4. Code Quality
+
+- No comments unless strictly necessary and timeless
+- Incorrect or outdated comments must be removed or corrected
+- Code is self-documenting through clear naming
+
+### 5. Zero Technical Debt
+
+- Do not create adapters for backwards compatibility
+- Remove legacy code
+- Implement the full final solution
+- Never hack tests to pass — fix the root cause
+
+### 6. Uncertainty Protocol
+
+If uncertain about correct behaviour: **ask the user**. Do not guess, assume, or implement
+workarounds.
+
+### 7. Understand the Architecture First
+
+Before making any change, read the HLD and the relevant LLD. Understand how the change
+fits the overall data flow. Never modify code without knowing why.
+
+### 8. Communication Tone
+
+- Neutral, factual, objective
+- Not sensational or sycophantic
+- Provide honest and critical feedback
+- Validate claims with evidence before stating them
+
+---
+
+## Repository Structure
+
+```
+k8sgpt-mendabot/
+├── README.md                          # User-facing README
+├── README-LLM.md                      # This file
+├── go.mod
+├── go.sum
+│
+├── api/
+│   └── v1alpha1/
+│       └── result_types.go            # k8sgpt-operator CRD types (vendored subset)
+│
+├── cmd/
+│   └── watcher/
+│       └── main.go                    # Controller entrypoint
+│
+├── internal/
+│   ├── controller/
+│   │   ├── result_controller.go       # Reconcile loop for Result CRDs
+│   │   └── result_controller_test.go
+│   └── jobbuilder/
+│       ├── job.go                     # Builds Job spec from a Result
+│       └── job_test.go
+│
+├── deploy/
+│   └── kustomize/
+│       ├── kustomization.yaml
+│       ├── namespace.yaml
+│       ├── serviceaccount-watcher.yaml
+│       ├── serviceaccount-agent.yaml
+│       ├── clusterrole-watcher.yaml
+│       ├── clusterrole-agent.yaml
+│       ├── clusterrolebinding-watcher.yaml
+│       ├── clusterrolebinding-agent.yaml
+│       ├── role-watcher.yaml
+│       ├── rolebinding-watcher.yaml
+│       ├── configmap-prompt.yaml
+│       ├── secret-github-app.yaml     # Placeholder — fill manually, never commit real values
+│       ├── secret-llm.yaml            # Placeholder — fill manually, never commit real values
+│       └── deployment-watcher.yaml
+│
+├── docker/
+│   ├── Dockerfile.agent               # debian-slim + opencode + kubectl + k8sgpt + helm + flux + gh
+│   └── scripts/
+│       └── get-github-app-token.sh    # Exchanges GitHub App private key for installation token
+│
+├── docs/
+│   ├── README.md
+│   ├── DESIGN/
+│   │   ├── HLD.md                     # Authoritative high-level design
+│   │   └── lld/
+│   │       ├── CONTROLLER_LLD.md
+│   │       ├── JOBBUILDER_LLD.md
+│   │       ├── AGENT_IMAGE_LLD.md
+│   │       ├── DEPLOY_LLD.md
+│   │       └── PROMPT_LLD.md
+│   ├── BACKLOG/
+│   │   ├── README.md
+│   │   ├── epic00-foundation/
+│   │   ├── epic01-controller/
+│   │   ├── epic02-jobbuilder/
+│   │   ├── epic03-agent-image/
+│   │   ├── epic04-deploy/
+│   │   ├── epic05-prompt/
+│   │   ├── epic06-ci-cd/
+│   │   └── epic07-technical-debt/
+│   └── WORKLOGS/
+│       └── README.md
+│
+└── .github/
+    └── workflows/
+        ├── build-watcher.yaml         # Builds and pushes watcher image to ghcr.io
+        ├── build-agent.yaml           # Builds and pushes agent image to ghcr.io
+        └── test.yaml                  # go test ./...
+```
+
+**Key principles:**
+- Every major folder has a README.md
+- READMEs are the first thing to read when entering a folder
+- READMEs are short but define rules for reading and editing
+
+---
+
+## Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│  Kubernetes Cluster                                                  │
+│                                                                      │
+│  ┌──────────────────┐  writes   ┌──────────────────────────────┐   │
+│  │  k8sgpt-operator │ ────────▶ │  Result CRDs                 │   │
+│  │  (pre-existing)  │           │  (results.core.k8sgpt.ai)    │   │
+│  └──────────────────┘           └──────────────┬───────────────┘   │
+│                                                 │ watch             │
+│                                  ┌──────────────▼───────────────┐  │
+│                                  │  mendabot-watcher             │  │
+│                                  │  (Deployment)                 │  │
+│                                  │                               │  │
+│                                  │  - informer on Result CRDs    │  │
+│                                  │  - in-memory dedup by         │  │
+│                                  │    parent fingerprint         │  │
+│                                  │  - creates one Job per        │  │
+│                                  │    unique fingerprint         │  │
+│                                  └──────────────┬───────────────┘  │
+│                                                 │ creates           │
+│                                  ┌──────────────▼───────────────┐  │
+│                                  │  mendabot-agent Job           │  │
+│                                  │  (one per unique finding)     │  │
+│                                  │                               │  │
+│                                  │  init: git clone GitOps repo  │  │
+│                                  │  main: opencode run <prompt>  │  │
+│                                  │    tools: kubectl (read-only) │  │
+│                                  │           k8sgpt analyze      │  │
+│                                  │           gh pr create        │  │
+│                                  └───────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────┘
+                                          │
+                                          ▼ opens PR
+                         ┌────────────────────────────────┐
+                         │  lenaxia/talos-ops-prod         │
+                         │  (GitOps repo)                  │
+                         └────────────────────────────────┘
+```
+
+### Deduplication logic
+
+The watcher holds an in-memory map keyed by a **parent-resource fingerprint**:
+
+```
+fingerprint = sha256( namespace + kind + parentObject + sorted(error[].text) )
+```
+
+Using `parentObject` (e.g. the owning Deployment) rather than the individual resource name
+means repeated pod restarts from the same bad Deployment produce one investigation, not one
+per pod. If the error set changes materially (hash changes), a new investigation is triggered.
+
+State is intentionally not persisted. On watcher restart, Result CRDs will re-trigger
+reconciliation. Duplicate PR detection is delegated to the OpenCode agent (via `gh pr list`
+search), so reprocessing is safe — it just results in a comment on the existing PR rather
+than a new one.
+
+### Job lifecycle
+
+| Setting | Value |
+|---|---|
+| `restartPolicy` | `Never` |
+| `backoffLimit` | `1` |
+| `activeDeadlineSeconds` | `900` (15 min hard timeout) |
+| `ttlSecondsAfterFinished` | `86400` (1 day cleanup) |
+| Name | `mendabot-agent-<first-12-chars-of-fingerprint>` |
+
+### GitHub authentication
+
+The agent uses a GitHub App (not a PAT). The init container calls
+`get-github-app-token.sh` to exchange the App private key for a short-lived installation
+token (valid 1 hour), written to a shared `emptyDir` volume, then consumed by the main
+container for git clone and `gh` operations.
+
+---
+
+## Technology Stack
+
+| Component | Technology | Reason |
+|---|---|---|
+| Controller language | Go 1.24 | Type-safe, matches k8sgpt ecosystem |
+| Controller framework | controller-runtime v0.19.3 | Standard Kubernetes controller pattern |
+| Logging | go.uber.org/zap | Structured logging, matches k8sgpt |
+| Agent base image | debian:bookworm-slim | Stable, rich apt ecosystem |
+| kubectl | Official release binary | Standard cluster interaction |
+| k8sgpt | Official release binary | Direct analysis capability |
+| helm | Official release binary | GitOps repo uses Helm releases |
+| flux | Official release binary | GitOps repo uses Flux |
+| gh | GitHub CLI | PR creation, search, and commenting |
+| opencode | Official install script | AI agent driver |
+| Manifests | Kustomize | Matches talos-ops-prod GitOps pattern |
+| Image registry | ghcr.io | Free, integrated with GitHub Actions |
+
+---
+
+## Worklog Requirements
+
+Worklogs are **mandatory**. They are the institutional memory of this project. Every
+meaningful session must produce a worklog entry. This is not optional.
+
+### When to write a worklog
+
+Write a worklog entry after **any** of the following:
+
+- Completing a user story or part of one
+- Making an architectural decision
+- Discovering a bug or unexpected behaviour
+- Completing a design document
+- Running into a blocker
+- Starting or finishing a feature branch
+- Any session longer than 30 minutes of work
+
+If in doubt: **write the worklog**.
+
+### Worklog file naming
+
+```
+NNNN_YYYY-MM-DD_short-description.md
+```
+
+- `NNNN` is a zero-padded sequential number starting at `0001`
+- Date is the actual date the work was done
+- Description is lowercase, hyphen-separated, 3–6 words
+- Next entry: check the highest existing number and increment by 1
+
+Examples:
+```
+0001_2026-02-19_initial-design-and-docs.md
+0002_2026-02-20_hld-review-and-revision.md
+0003_2026-02-21_controller-tdd-foundation.md
+```
+
+### Worklog format
+
+Every worklog entry must follow this exact structure:
+
+```markdown
+# Worklog: <Short Title>
+
+**Date:** YYYY-MM-DD
+**Session:** <brief description of what this session was about>
+**Status:** Complete | In Progress | Blocked
+
+---
+
+## Objective
+
+What was the goal of this session?
+
+---
+
+## Work Completed
+
+### 1. <Area of work>
+- Specific thing done
+- Specific thing done
+
+### 2. <Area of work>
+- Specific thing done
+
+---
+
+## Key Decisions
+
+List any decisions made and the rationale behind them. If a decision was
+made without enough information, note that and flag it for follow-up.
+
+---
+
+## Blockers
+
+List anything that is blocking progress. Include what information or action
+is needed to unblock. If none, write "None."
+
+---
+
+## Tests Run
+
+List test commands run and their outcomes. If no tests were run, explain why.
+
+---
+
+## Next Steps
+
+What should the next session start with? Be specific enough that a fresh
+context can pick up immediately without re-reading everything.
+
+---
+
+## Files Modified
+
+List every file created or modified in this session.
+```
+
+### Worklog discipline rules
+
+1. **Write it before ending the session** — not the next day. Memory degrades fast.
+2. **Be specific** — vague entries like "worked on controller" are useless. Name the
+   functions, the decisions, the line numbers if relevant.
+3. **Document decisions with rationale** — not just what was decided, but why. Future
+   sessions will need to understand the reasoning, not just the outcome.
+4. **Record blockers immediately** — if you are blocked, write it down. Do not silently
+   skip the entry.
+5. **List every file touched** — this makes it trivial to audit what changed in a session.
+6. **Next steps must be actionable** — "continue implementation" is not actionable.
+   "Implement `fingerprintFor()` in `internal/controller/result_controller.go` and write
+   tests first per TDD" is actionable.
+7. **Never retroactively rewrite a worklog** — worklogs are append-only history. If
+   something was wrong, note the correction in the next entry.
+
+### Worklog index
+
+`docs/WORKLOGS/README.md` must be kept up to date with a table of all entries:
+
+```markdown
+| # | Date | Description | Status |
+|---|------|-------------|--------|
+| 0001 | 2026-02-19 | Initial design and docs | Complete |
+```
+
+Update this table every time a new worklog is added.
+
+---
+
+## Development Workflow
+
+### Before starting work
+
+1. Read `README-LLM.md` (this file)
+2. Read `docs/WORKLOGS/README.md` — scan the last 3–5 entries to understand current state
+3. Read the latest worklog entry to find the documented next steps
+4. Read the relevant LLD for the component you are about to touch
+5. Check `docs/BACKLOG/` for the current story status
+
+### During work
+
+1. Write tests first — TDD, always
+2. Use strongly-typed structs
+3. Update backlog story checklists as you complete tasks
+4. Commit at each logical unit of work with a descriptive message
+
+### After completing work
+
+1. Run all tests: `go test -timeout 30s -race ./...`
+2. Verify tests pass
+3. Update backlog story status
+4. **Write a worklog entry** (see [Worklog Requirements](#worklog-requirements))
+5. Update `docs/WORKLOGS/README.md` index table
+6. Commit everything
+
+---
+
+## Common Commands
+
+```bash
+# Tidy dependencies
+go mod tidy
+
+# Build watcher binary
+go build -o bin/mendabot-watcher ./cmd/watcher/
+
+# Run all tests with timeout and race detector
+go test -timeout 30s -race ./...
+
+# Run tests with coverage
+go test -timeout 30s -cover ./...
+
+# Format code
+go fmt ./...
+
+# Static analysis
+go vet ./...
+
+# Build agent image locally
+docker build -f docker/Dockerfile.agent -t mendabot-agent:dev .
+
+# Apply Kustomize manifests (dry-run)
+kubectl apply -k deploy/kustomize/ --dry-run=client
+
+# Apply manifests
+kubectl apply -k deploy/kustomize/
+```
+
+---
+
+## Branch Management
+
+**Active branches:**
+
+| Branch | Purpose | Status | Created |
+|--------|---------|--------|---------|
+| `main` | Stable code | Active | 2026-02-19 |
+
+**Merged branches:**
+
+| Branch | Purpose | Merged | Commit |
+|--------|---------|--------|--------|
+| _(none yet)_ | — | — | — |
+
+**Branch naming:**
+- Feature: `feature/short-description`
+- Bugfix: `bugfix/issue-description`
+- Hotfix: `hotfix/critical-issue`
+
+**Branch workflow:**
+1. Create branch from `main`
+2. Add to the active branches table above
+3. Work in branch with regular commits
+4. Write a worklog entry before merging
+5. Merge to `main` when complete and all tests pass
+6. Move to merged table, delete branch
+
+---
+
+## Testing Requirements
+
+### TDD workflow
+
+```
+1. Write test first
+2. Run — must fail
+3. Write minimal code to pass
+4. Run — must pass
+5. Refactor
+```
+
+### Coverage requirements
+
+- Multiple happy path cases
+- Multiple unhappy path cases
+- Edge cases (empty fields, nil slices, very long strings)
+- Error conditions
+
+### Table-driven tests
+
+Use table-driven tests with `t.Run()` for any function with multiple input cases:
+
+```go
+func TestFingerprintFor(t *testing.T) {
+    tests := []struct {
+        name string
+        spec ResultSpec
+        want string
+    }{
+        {"empty errors", ResultSpec{...}, "abc123..."},
+    }
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            got := fingerprintFor(tt.spec)
+            if got != tt.want {
+                t.Errorf("got %s, want %s", got, tt.want)
+            }
+        })
+    }
+}
+```
+
+### Always use timeout
+
+```bash
+# Good
+go test -timeout 30s ./...
+
+# Bad — can hang forever
+go test ./...
+```
+
+---
+
+## Version History
+
+| Version | Date | Changes |
+|---------|------|---------|
+| 1.0 | 2026-02-19 | Initial creation |

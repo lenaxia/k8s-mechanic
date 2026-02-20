@@ -1,0 +1,14 @@
+bin/
+*.test
+*.out
+coverage.out
+.env
+.env.*
+*.pem
+*.key
+/deploy/kustomize/secret-*.yaml
+!deploy/kustomize/secret-*-placeholder.yaml
+.vscode/
+.idea/
+*.swp
+.DS_Store

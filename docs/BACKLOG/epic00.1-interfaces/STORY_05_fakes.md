@@ -9,9 +9,9 @@
 
 ## User Story
 
-As a **developer**, I want fake implementations of the `JobBuilder` interface so that
-controller unit tests (specifically `fingerprintFor` and the dedup map logic) can run
-without constructing real `batch/v1 Job` objects or touching the Kubernetes API.
+As a **developer**, I want a fake `JobBuilder` implementation so that `RemediationJobReconciler`
+unit tests can inject a controllable builder without constructing real `batch/v1 Job`
+objects or touching the Kubernetes API.
 
 ---
 
@@ -20,7 +20,6 @@ without constructing real `batch/v1 Job` objects or touching the Kubernetes API.
 - [ ] `internal/controller/fakes_test.go` (package `controller_test`) defines:
 
   ```go
-  // fakeJobBuilder records calls to Build() for assertion in tests.
   type fakeJobBuilder struct {
       calls     []fakeJobBuilderCall
       returnJob *batchv1.Job
@@ -28,54 +27,69 @@ without constructing real `batch/v1 Job` objects or touching the Kubernetes API.
   }
 
   type fakeJobBuilderCall struct {
-      Result      *v1alpha1.Result
-      Fingerprint string
+      RemediationJob *v1alpha1.RemediationJob
   }
 
-  func (f *fakeJobBuilder) Build(result *v1alpha1.Result, fp string) (*batchv1.Job, error) {
-      f.calls = append(f.calls, fakeJobBuilderCall{result, fp})
+  func (f *fakeJobBuilder) Build(rjob *v1alpha1.RemediationJob) (*batchv1.Job, error) {
+      f.calls = append(f.calls, fakeJobBuilderCall{rjob})
       return f.returnJob, f.returnErr
   }
   ```
 
-- [ ] `fakeJobBuilder` satisfies `domain.JobBuilder` — verified by a compile-time
-  assertion in `fakes_test.go`:
+- [ ] `fakeJobBuilder` satisfies `domain.JobBuilder` — verified by a compile-time assertion:
   ```go
   var _ domain.JobBuilder = (*fakeJobBuilder)(nil)
   ```
-- [ ] A `defaultFakeJob()` helper returns a minimal valid `*batchv1.Job` usable as the
-  return value in tests that need the controller to proceed past the `Build()` call
+
+- [ ] `internal/provider/k8sgpt/fakes_test.go` (package `k8sgpt_test`) defines:
+
+  ```go
+  // No fake needed for SourceProvider in unit tests — the ResultReconciler
+  // is tested directly. This file is a placeholder for future provider fakes.
+  ```
+
+  For now, the `K8sGPTSourceProvider` is tested by exercising `ResultReconciler`
+  directly in envtest integration tests (no fake needed).
+
+- [ ] A `defaultFakeJob(rjob *v1alpha1.RemediationJob) *batchv1.Job` helper returns a
+  minimal valid `*batchv1.Job` with:
+  - Correct name (`mendabot-agent-<fp[:12]>`)
+  - Correct namespace
+  - The ownerReference pointing at `rjob`
+  - Label `remediation.k8sgpt.ai/remediation-job=rjob.Name`
+  This allows controller tests to call `fakeJobBuilder.returnJob = defaultFakeJob(rjob)`
+  and proceed past the `Build()` call without asserting on the full Job spec.
+
 - [ ] Unit tests in `fakes_test.go` verify:
   - `fakeJobBuilder.Build()` records each call
   - `fakeJobBuilder` with `returnErr != nil` propagates the error
-- [ ] No fake of `client.Client` — the controller integration tests use envtest's real
-  client. Hand-rolled client fakes introduce more bugs than they prevent.
+  - `defaultFakeJob()` returns a Job with the correct name pattern
 
 ---
 
-## Scope Boundary
+## Scope
 
-This story defines only the `fakeJobBuilder`. It does not define fake loggers (use
-`zap.NewNop()` from the zap package directly), fake schemes (use `runtime.NewScheme()`),
-or fake managers (not needed — unit tests for pure functions do not need a manager).
+This story defines `fakeJobBuilder` for `RemediationJobReconciler` tests. For logger
+fakes, use `zap.NewNop()` directly. For the scheme, use `runtime.NewScheme()`. No client
+fake — controller integration tests use envtest's real client.
+
+`SourceProvider` has no fake in v1: `ResultReconciler` is tested directly in envtest.
 
 ---
 
 ## Tasks
 
-- [ ] Create `internal/controller/fakes_test.go` with `fakeJobBuilder`, `fakeJobBuilderCall`,
-  `defaultFakeJob()`, and the compile-time assertion
-- [ ] Write tests for the fake itself (TDD — even fakes need tests)
+- [ ] Create `internal/controller/fakes_test.go` with `fakeJobBuilder`,
+  `fakeJobBuilderCall`, `defaultFakeJob()`, and the compile-time assertion
+- [ ] Write unit tests for the fake itself (TDD — fakes need tests too)
 
 ---
 
 ## Dependencies
 
+**Depends on:** STORY_01 (RemediationJob type)
 **Depends on:** STORY_02 (JobBuilder interface)
-**Depends on:** epic00-foundation/STORY_04 (CRD types — fakeJobBuilderCall stores `*v1alpha1.Result`)
-**Blocks:** epic01-controller/STORY_02 (fingerprintFor tests use fakeJobBuilder indirectly)
-**Blocks:** epic01-controller/STORY_03 (dedup map tests inject fakeJobBuilder)
-**Blocks:** epic01-controller/STORY_04 (reconcile loop unit tests)
+**Blocks:** epic01-controller/STORY_04 (RemediationJobReconciler unit tests inject fakeJobBuilder)
 
 ---
 

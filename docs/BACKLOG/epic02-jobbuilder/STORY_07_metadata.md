@@ -18,15 +18,16 @@ environment variables.
 ## Acceptance Criteria
 
 - [ ] Labels: `app.kubernetes.io/managed-by: mendabot-watcher`,
-  `opencode.io/finding-fingerprint: <first-12>`,
-  `opencode.io/finding-kind: <kind>`
-- [ ] Annotations: `opencode.io/fingerprint-full: <full-64>`,
-  `opencode.io/finding-parent: <parentObject>`,
-  `opencode.io/result-name: <result.Name>`,
-  `opencode.io/result-namespace: <result.Namespace>`
+  `remediation.k8sgpt.ai/fingerprint: <first-12>`,
+  `remediation.k8sgpt.ai/remediation-job: <rjob.Name>`,
+  `remediation.k8sgpt.ai/finding-kind: <kind>`
+- [ ] Annotations: `remediation.k8sgpt.ai/fingerprint-full: <full-64>`,
+  `remediation.k8sgpt.ai/finding-parent: <parentObject>`
+- [ ] OwnerReference: points at the `RemediationJob` with correct UID, `Controller=true`,
+  `BlockOwnerDeletion=true`
 - [ ] Job settings: `BackoffLimit=1`, `ActiveDeadlineSeconds=900`,
   `TTLSecondsAfterFinished=86400`, `RestartPolicy=Never`
-- [ ] Unit tests verify each label, annotation, and job setting
+- [ ] Unit tests verify each label, annotation, ownerReference field, and job setting
 
 ---
 

@@ -1,9 +1,9 @@
 # Domain: Job Builder — Low-Level Design
 
-**Version:** 1.1
-**Date:** 2026-02-19
+**Version:** 2.0
+**Date:** 2026-02-20
 **Status:** Implementation Ready
-**HLD Reference:** [Sections 4.2, 5, 12](../HLD.md)
+**HLD Reference:** [Sections 4.3, 5, 12](../HLD.md)
 
 ---
 
@@ -67,13 +67,16 @@ func New(cfg Config) *Builder
 ## 4. Build() Method
 
 ```go
-func (b *Builder) Build(result *v1alpha1.Result, fingerprint string) (*batchv1.Job, error)
+func (b *Builder) Build(rjob *v1alpha1.RemediationJob) (*batchv1.Job, error)
 ```
+
+The input is now a `*RemediationJob`. The fingerprint and all finding context are read
+from `rjob.Spec` — the builder no longer accepts a separate fingerprint argument.
 
 ### Job name
 
 ```go
-jobName := "mendabot-agent-" + fingerprint[:12]
+jobName := "mendabot-agent-" + rjob.Spec.Fingerprint[:12]
 ```
 
 12 characters provides sufficient collision resistance for a single cluster workload
@@ -103,15 +106,15 @@ name:    "mendabot-agent"
 image:   b.cfg.AgentImage
 command: ["/usr/local/bin/agent-entrypoint.sh"]
 env:
-  - FINDING_KIND          = result.Spec.Kind
-  - FINDING_NAME          = result.Spec.Name  (plain name, no namespace prefix)
-  - FINDING_NAMESPACE     = result.Namespace  (ObjectMeta namespace)
-  - FINDING_PARENT        = result.Spec.ParentObject
-  - FINDING_ERRORS        = json(result.Spec.Error with Sensitive fields redacted)
-  - FINDING_DETAILS       = result.Spec.Details
-  - FINDING_FINGERPRINT   = fingerprint (full 64-char hex)
-  - GITOPS_REPO           = b.cfg.GitOpsRepo
-  - GITOPS_MANIFEST_ROOT  = b.cfg.GitOpsManifestRoot
+  - FINDING_KIND          = rjob.Spec.Finding.Kind
+  - FINDING_NAME          = rjob.Spec.Finding.Name
+  - FINDING_NAMESPACE     = rjob.Spec.Finding.Namespace
+  - FINDING_PARENT        = rjob.Spec.Finding.ParentObject
+  - FINDING_ERRORS        = rjob.Spec.Finding.Errors  (already redacted JSON)
+  - FINDING_DETAILS       = rjob.Spec.Finding.Details
+  - FINDING_FINGERPRINT   = rjob.Spec.Fingerprint (full 64-char hex)
+  - GITOPS_REPO           = rjob.Spec.GitOpsRepo
+  - GITOPS_MANIFEST_ROOT  = rjob.Spec.GitOpsManifestRoot
   - OPENAI_API_KEY             (from Secret llm-credentials, key: api-key)
   - OPENAI_BASE_URL            (from Secret llm-credentials, key: base-url, optional)
   - OPENAI_MODEL               (from Secret llm-credentials, key: model, optional)
@@ -139,15 +142,24 @@ batchv1.Job{
         Name:      jobName,
         Namespace: b.cfg.AgentNamespace,
         Labels: map[string]string{
-            "app.kubernetes.io/managed-by":   "mendabot",
-            "opencode.io/finding-fingerprint": fingerprint[:12],
-            "opencode.io/finding-kind":        result.Spec.Kind,
+            "app.kubernetes.io/managed-by":            "mendabot-watcher",
+            "remediation.k8sgpt.ai/fingerprint":       rjob.Spec.Fingerprint[:12],
+            "remediation.k8sgpt.ai/remediation-job":   rjob.Name,
+            "remediation.k8sgpt.ai/finding-kind":      rjob.Spec.Finding.Kind,
         },
         Annotations: map[string]string{
-            "opencode.io/fingerprint-full":  fingerprint,
-            "opencode.io/finding-parent":    result.Spec.ParentObject,
-            "opencode.io/result-name":       result.Name,
-            "opencode.io/result-namespace":  result.Namespace,
+            "remediation.k8sgpt.ai/fingerprint-full":  rjob.Spec.Fingerprint,
+            "remediation.k8sgpt.ai/finding-parent":    rjob.Spec.Finding.ParentObject,
+        },
+        OwnerReferences: []metav1.OwnerReference{
+            {
+                APIVersion:         "remediation.k8sgpt.ai/v1alpha1",
+                Kind:               "RemediationJob",
+                Name:               rjob.Name,
+                UID:                rjob.UID,
+                Controller:         ptr(true),
+                BlockOwnerDeletion: ptr(true),
+            },
         },
     },
     Spec: batchv1.JobSpec{
@@ -235,32 +247,22 @@ container. Both containers mount `shared-workspace` at `/workspace`.
 
 ---
 
-## 6. FINDING_ERRORS Serialisation
+## 6. FINDING_ERRORS — Already Redacted
 
-`result.Spec.Error` is `[]Failure`. Before serialisation, `Sensitive` fields are redacted:
-each `Failure.Sensitive` slice is replaced with an empty slice. Only `Failure.Text` is
-sent to the agent. This prevents secrets or PII from leaking to the LLM via environment
-variables.
+In the CRD-based design, `FINDING_ERRORS` is pre-computed during `RemediationJob`
+creation (in the `ResultReconciler`) and stored in `rjob.Spec.Finding.Errors` as a
+redacted JSON string. The job builder reads this field directly — it does not perform
+Sensitive field redaction. Redaction is the ResultReconciler's responsibility.
 
-```go
-redacted := make([]v1alpha1.Failure, len(result.Spec.Error))
-for i, f := range result.Spec.Error {
-    redacted[i] = v1alpha1.Failure{Text: f.Text}
-}
-errorsJSON, err := json.Marshal(redacted)
-if err != nil {
-    return nil, fmt.Errorf("serialising result errors: %w", err)
-}
-```
-
-The agent receives a valid JSON string containing only error texts.
+This simplifies the builder and makes the stored `RemediationJob` spec itself auditable:
+what the agent receives is exactly what is stored in the CRD.
 
 ---
 
 ## 7. Testing Strategy
 
-All tests are pure unit tests — no cluster, no envtest. The `Build()` method is a pure
-function that takes typed inputs and returns a typed output; it is straightforward to test.
+All tests remain pure unit tests — no cluster, no envtest. The `Build()` method is a pure
+function that takes a `*RemediationJob` and returns a `*batchv1.Job`.
 
 | Test | Description |
 |---|---|
@@ -268,20 +270,19 @@ function that takes typed inputs and returns a typed output; it is straightforwa
 | `TestBuild_JobNameDeterministic` | Same input twice → same Job name |
 | `TestBuild_Namespace` | Job is in configured namespace |
 | `TestBuild_ServiceAccount` | Job uses configured ServiceAccount |
-| `TestBuild_EnvVars_AllPresent` | All FINDING_*, FINDING_NAMESPACE, GITOPS_REPO, GITOPS_MANIFEST_ROOT env vars present |
-| `TestBuild_EnvVars_FindingNameNoNamespacePrefix` | FINDING_NAME is plain name, no namespace/ prefix |
-| `TestBuild_EnvVars_FindingNamespace` | FINDING_NAMESPACE equals result.Namespace |
-| `TestBuild_EnvVars_ErrorsJSON` | FINDING_ERRORS is valid JSON with Sensitive fields redacted |
-| `TestBuild_EnvVars_SensitiveRedacted` | Sensitive fields absent from FINDING_ERRORS |
+| `TestBuild_EnvVars_AllPresent` | All FINDING_*, GITOPS_REPO, GITOPS_MANIFEST_ROOT env vars present |
+| `TestBuild_EnvVars_FindingNameNoNamespacePrefix` | FINDING_NAME is plain name |
+| `TestBuild_EnvVars_FindingNamespace` | FINDING_NAMESPACE equals rjob.Spec.Finding.Namespace |
+| `TestBuild_EnvVars_ErrorsJSON` | FINDING_ERRORS equals rjob.Spec.Finding.Errors verbatim |
 | `TestBuild_InitContainer_Present` | Init container named "git-token-clone" exists |
 | `TestBuild_InitContainer_UsesAgentImage` | Init container uses same image as main container |
 | `TestBuild_MainContainer_Present` | Main container named "mendabot-agent" exists |
 | `TestBuild_MainContainer_Command` | Main container command is ["/usr/local/bin/agent-entrypoint.sh"] |
-| `TestBuild_SecretKeyRefs` | secretKeyRef keys match Secret key names (app-id, api-key, etc.) |
+| `TestBuild_SecretKeyRefs` | secretKeyRef keys match Secret key names |
 | `TestBuild_Volumes_AllPresent` | shared-workspace, prompt-configmap, github-app-secret |
 | `TestBuild_JobSettings` | BackoffLimit=1, ActiveDeadlineSeconds=900, TTL=86400 |
 | `TestBuild_RestartPolicy` | RestartPolicy is Never |
-| `TestBuild_Labels` | managed-by and fingerprint labels present |
-| `TestBuild_Annotations` | Full fingerprint and parent annotations present |
-| `TestBuild_EmptyErrors` | nil error slice → FINDING_ERRORS is "[]" |
+| `TestBuild_Labels` | managed-by, fingerprint, remediation-job labels present |
+| `TestBuild_OwnerReference` | OwnerReference points at RemediationJob with correct UID |
+| `TestBuild_EmptyErrors` | Empty Errors string → FINDING_ERRORS is empty string |
 | `TestBuild_LongDetails` | Very long Details string does not truncate or error |

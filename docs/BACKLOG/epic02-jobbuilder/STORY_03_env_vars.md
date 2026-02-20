@@ -18,10 +18,12 @@ runtime.
 ## Acceptance Criteria
 
 - [ ] All variables from JOBBUILDER_LLD.md §4 are present in the main container env
-- [ ] `FINDING_ERRORS` is valid compact JSON (from `json.Marshal(result.Spec.Error)`)
-- [ ] `FINDING_ERRORS` with a nil error slice marshals to `null` or `[]` without error
+- [ ] `FINDING_ERRORS` is read directly from `rjob.Spec.Finding.Errors` — verbatim,
+  no additional serialisation. Redaction was done by the `ResultReconciler` before the
+  `RemediationJob` was created.
 - [ ] Secret-sourced vars (GITHUB_APP_*, OPENAI_*) use `valueFrom.secretKeyRef`
-- [ ] Config-sourced vars (GITOPS_REPO) use literal `value`
+- [ ] Config-sourced vars (GITOPS_REPO, GITOPS_MANIFEST_ROOT) use literal `value`
+  (sourced from `rjob.Spec.GitOpsRepo` and `rjob.Spec.GitOpsManifestRoot`)
 - [ ] Unit tests verify all variables are present and correctly sourced
 
 ---
@@ -30,7 +32,6 @@ runtime.
 
 - [ ] Write tests first (TDD) — test helper to find env var by name in container spec
 - [ ] Implement env var building in `Build()`
-- [ ] Handle `json.Marshal` error on `result.Spec.Error` (wrap and return)
 
 ---
 

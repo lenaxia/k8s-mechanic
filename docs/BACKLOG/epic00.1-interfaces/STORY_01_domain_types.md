@@ -3,7 +3,7 @@
 **Epic:** [Interfaces and Test Infrastructure](README.md)
 **Priority:** Critical
 **Status:** Not Started
-**Estimated Effort:** 1 hour
+**Estimated Effort:** 1.5 hours
 
 ---
 
@@ -17,18 +17,7 @@ duplication.
 
 ## Acceptance Criteria
 
-- [ ] `internal/domain/types.go` defines `processedEntry` with all fields used by the
-  controller reconcile loop:
-  ```go
-  type processedEntry struct {
-      fingerprint  string
-      dispatchedAt time.Time
-      jobName      string
-      resultRef    types.NamespacedName
-  }
-  ```
-- [ ] `internal/domain/types.go` defines `JobBuilderConfig` — the typed config passed to
-  the job builder:
+- [ ] `internal/domain/types.go` defines `JobBuilderConfig`:
   ```go
   type JobBuilderConfig struct {
       GitOpsRepo         string
@@ -38,28 +27,52 @@ duplication.
       AgentSA            string
   }
   ```
-  (This is derived from `Config` but is its own type — the job builder must not depend
-  on the full `Config` struct or the config package.)
-- [ ] Unit tests in `internal/domain/types_test.go` verify:
-  - `processedEntry` zero value is safe to use
-  - `JobBuilderConfig` fields are all string types (compile-time — no runtime test needed)
-- [ ] No other package (config, controller, jobbuilder) duplicates these types
+  The job builder must not depend on the full `config.Config` struct — it receives only
+  the fields it needs via this type.
+
+- [ ] `api/v1alpha1/remediationjob_types.go` defines all types from REMEDIATIONJOB_LLD.md §2:
+  - `RemediationJobSpec`, `ResultRef`, `FindingSpec`
+  - `SourceType` constant(s): `SourceTypeK8sGPT = "k8sgpt"`
+  - `RemediationJobStatus`, `RemediationJobPhase` constants
+  - Condition type constants (`ConditionJobDispatched`, `ConditionJobComplete`, `ConditionJobFailed`)
+  - `RemediationJob` (with kubebuilder markers)
+  - `RemediationJobList`
+  - `DeepCopyObject()` and `DeepCopyInto()` for both `RemediationJob` and `RemediationJobList`
+  - `AddToScheme` that registers both `Result`/`ResultList` (from STORY_04 of epic00) and
+    `RemediationJob`/`RemediationJobList` under scheme group `remediation.k8sgpt.ai/v1alpha1`
+
+- [ ] `RemediationJobSpec.SourceType` is a required string field, immutable after creation;
+  `K8sGPTSourceProvider` always sets it to `"k8sgpt"`
+
+- [ ] Unit tests in `api/v1alpha1/remediationjob_types_test.go` verify:
+  - `DeepCopyObject()` produces an independent copy (mutating copy does not affect original)
+  - `DeepCopyInto()` performs true deep copy of slice fields (`Conditions`, `Spec.Finding`)
+  - Phase constants have the expected string values
+  - `SourceType` constants have the expected string values (`"k8sgpt"`)
+  - Zero value `RemediationJobStatus` has empty Phase (not an invalid phase)
+
+- [ ] No other package duplicates these types
 
 ---
 
-## Why a Separate `domain` Package
+## Why `FindingSpec` Stores Errors as a String
 
-The controller imports `config` and the job builder also uses config values. If both
-packages define their own config struct they diverge. A shared `domain` package with no
-dependencies on either `config` or `controller` breaks the circular import risk and makes
-the types independently testable.
+`FindingSpec.Errors` is a pre-serialised JSON string rather than `[]Failure`. This avoids
+needing to define the full `Failure` schema inside the `RemediationJob` CRD and ensures
+that what the agent receives via env var is exactly what is stored in the CRD — no
+additional serialisation step at Job creation time.
+
+Redaction of `Sensitive` fields happens in the `ResultReconciler` before the
+`RemediationJob` is created.
 
 ---
 
 ## Tasks
 
-- [ ] Create `internal/domain/types.go`
-- [ ] Create `internal/domain/types_test.go` (TDD — write tests first)
+- [ ] Create `api/v1alpha1/remediationjob_types_test.go` (TDD — tests first)
+- [ ] Create `api/v1alpha1/remediationjob_types.go` with all types and deep copy
+- [ ] Create `internal/domain/types.go` with `JobBuilderConfig`
+- [ ] Create `internal/domain/types_test.go`
 - [ ] Verify `go build ./...` still clean
 
 ---
@@ -67,7 +80,9 @@ the types independently testable.
 ## Dependencies
 
 **Depends on:** epic00-foundation/STORY_01 (module setup)
-**Blocks:** STORY_02 (Builder interface), STORY_03 (Reconciler skeleton)
+**Depends on:** epic00-foundation/STORY_04 (result_types.go — AddToScheme extends it)
+**Blocks:** STORY_02 (Builder interface uses `*v1alpha1.RemediationJob`)
+**Blocks:** STORY_03 (Reconciler skeleton uses both types)
 
 ---
 

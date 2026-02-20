@@ -1,81 +1,98 @@
-# Story: Reconciler Interface and Struct Skeleton
+# Story: Reconciler and Provider Skeletons
 
 **Epic:** [Interfaces and Test Infrastructure](README.md)
 **Priority:** Critical
 **Status:** Not Started
-**Estimated Effort:** 45 minutes
+**Estimated Effort:** 1 hour
 
 ---
 
 ## User Story
 
-As a **developer**, I want the `ResultReconciler` struct and its `SetupWithManager` method
-declared (but unimplemented) so that `cmd/watcher/main.go` can wire the full manager
-without the controller epic needing to be complete first.
+As a **developer**, I want the provider and reconciler structs declared (but unimplemented)
+so that `cmd/watcher/main.go` can wire the full manager, and `go build ./...` passes
+end-to-end before any reconcile logic is written.
 
 ---
 
 ## Acceptance Criteria
 
-- [ ] `internal/controller/result_controller.go` defines the `ResultReconciler` struct with
-  all fields it will need, but with stub method bodies that return `nil` or panic with
-  `"not implemented"`:
+- [ ] `internal/provider/k8sgpt/reconciler.go` defines `ResultReconciler` with all fields
+  from CONTROLLER_LLD.md §5.1, and stub `Reconcile` and `SetupWithManager` methods that
+  `panic("not implemented")`:
   ```go
   type ResultReconciler struct {
+      client.Client
+      Scheme *runtime.Scheme
+      Log    *zap.Logger
+      Cfg    config.Config
+  }
+  ```
+
+- [ ] `internal/provider/k8sgpt/provider.go` defines `K8sGPTSourceProvider` with the
+  struct and `SetupWithManager` from CONTROLLER_LLD.md §5.0:
+  ```go
+  type K8sGPTSourceProvider struct {
+      Cfg config.Config
+      Log *zap.Logger
+  }
+  func NewProvider(cfg config.Config, log *zap.Logger) *K8sGPTSourceProvider
+  func (p *K8sGPTSourceProvider) SetupWithManager(mgr ctrl.Manager) error
+  ```
+  Compile-time assertion: `var _ provider.SourceProvider = (*K8sGPTSourceProvider)(nil)`
+
+- [ ] `internal/controller/remediationjob_controller.go` defines `RemediationJobReconciler`
+  with all fields from CONTROLLER_LLD.md §6.1, and stub methods:
+  ```go
+  type RemediationJobReconciler struct {
       client.Client
       Scheme     *runtime.Scheme
       Log        *zap.Logger
       JobBuilder domain.JobBuilder
-      cfg        domain.JobBuilderConfig
-      mu         sync.Mutex
-      processed  map[string]domain.ProcessedEntry
-  }
-
-  func (r *ResultReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-      panic("not implemented")
-  }
-
-  func (r *ResultReconciler) SetupWithManager(mgr ctrl.Manager) error {
-      panic("not implemented")
+      Cfg        config.Config
   }
   ```
-- [ ] `cmd/watcher/main.go` is updated from its empty stub to wire up the manager,
-  config, logger, and reconciler skeleton — calling `mgr.Start()`. It does not need to
-  work end-to-end yet; the reconciler will panic if a Result arrives, which is acceptable
-  at this stage.
-- [ ] `go build ./...` compiles cleanly with the stub in place
-- [ ] No test is required for the stub itself — tests are written in epic01 when the
-  body is implemented (TDD applies to the logic, not the skeleton declaration)
+
+- [ ] `cmd/watcher/main.go` is updated from its empty stub to the full manager wiring
+  from CONTROLLER_LLD.md §7:
+  - Scheme registration (clientgo + batchv1 + v1alpha1)
+  - `config.FromEnv()` with fatal on error
+  - Logger construction
+  - `RemediationJobReconciler` registered directly
+  - Provider loop: `[]provider.SourceProvider{k8sgpt.NewProvider(cfg, logger)}`
+  - Health probes
+  - `mgr.Start(ctrl.SetupSignalHandler())`
+
+- [ ] `go build ./...` compiles cleanly with stubs in place
 
 ---
 
 ## Note on `main.go`
 
-`main.go` wiring is included here rather than in epic01 because:
-1. It only references the struct and interface — no logic
-2. It unblocks local `go build` verification throughout epics 01 and 02
-3. It will not change when epic01 implements the reconciler body
-
-The full wiring spec is in CONTROLLER_LLD.md §7.
+The full wiring is included here because it references only types and interfaces — no
+logic. It unblocks `go build` verification throughout all remaining epics and will not
+need to change when the reconciler bodies are implemented in epic01.
 
 ---
 
 ## Tasks
 
-- [ ] Create `internal/controller/result_controller.go` with struct + stub methods
-- [ ] Update `cmd/watcher/main.go` to full wiring (scheme, manager, reconciler, health probes,
-  signal handler) per CONTROLLER_LLD.md §7
+- [ ] Create `internal/provider/interface.go` (if not created in STORY_02)
+- [ ] Create `internal/provider/k8sgpt/provider.go` with struct + SetupWithManager stub
+- [ ] Create `internal/provider/k8sgpt/reconciler.go` with struct + stub methods
+- [ ] Create `internal/controller/remediationjob_controller.go` with struct + stub methods
+- [ ] Rewrite `cmd/watcher/main.go` with full manager wiring
 - [ ] Verify `go build ./...` compiles
 
 ---
 
 ## Dependencies
 
-**Depends on:** STORY_01 (domain types)
-**Depends on:** STORY_02 (JobBuilder interface)
-**Depends on:** epic00-foundation/STORY_03 (logging — Logger field type)
-**Depends on:** epic00-foundation/STORY_04 (CRD types — scheme registration)
-**Blocks:** epic01-controller (fills in the stub body)
+**Depends on:** STORY_01 (RemediationJob types + JobBuilderConfig)
+**Depends on:** STORY_02 (JobBuilder and SourceProvider interfaces)
+**Depends on:** epic00-foundation/STORY_03 (logging)
+**Depends on:** epic00-foundation/STORY_04 (CRD types + AddToScheme)
+**Blocks:** epic01-controller (fills in stub bodies)
 
 ---
 
@@ -83,4 +100,4 @@ The full wiring spec is in CONTROLLER_LLD.md §7.
 
 - [ ] `go build ./...` clean
 - [ ] `go vet ./...` clean
-- [ ] `main.go` contains full manager wiring, not just `func main() {}`
+- [ ] `main.go` contains full manager wiring with provider loop, not just `func main() {}`

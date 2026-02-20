@@ -1,9 +1,9 @@
 # Domain: Deployment & RBAC — Low-Level Design
 
-**Version:** 1.1
-**Date:** 2026-02-19
+**Version:** 3.0
+**Date:** 2026-02-20
 **Status:** Implementation Ready
-**HLD Reference:** [Sections 7, 13](../HLD.md)
+**HLD Reference:** [Sections 8, 14](../HLD.md)
 
 ---
 
@@ -17,7 +17,7 @@ in a cluster. All resources are managed via Kustomize in `deploy/kustomize/`.
 ### 1.2 Design Principles
 
 - **Least privilege** — watcher and agent have only the permissions they actually need
-- **Namespace isolation** — all workloads run in `mendabot-watcher`; agent Jobs are also
+- **Namespace isolation** — all workloads run in `mendabot`; agent Jobs are also
   created in this namespace
 - **No secrets committed** — secret manifests in the repo are placeholders only; real
   values are applied out-of-band or via Sealed Secrets / SOPS
@@ -33,7 +33,106 @@ in a cluster. All resources are managed via Kustomize in `deploy/kustomize/`.
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: mendabot-watcher
+  name: mendabot
+```
+
+---
+
+## 2.1 CRD
+
+```yaml
+# crd-remediationjob.yaml
+# Hand-written until code generation is adopted.
+# Full schema defined in REMEDIATIONJOB_LLD.md §2.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: remediationjobs.remediation.k8sgpt.ai
+spec:
+  group: remediation.k8sgpt.ai
+  names:
+    kind: RemediationJob
+    listKind: RemediationJobList
+    plural: remediationjobs
+    singular: remediationjob
+    shortNames: [rjob]
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    served: true
+    storage: true
+    subresources:
+      status: {}
+    additionalPrinterColumns:
+    - name: Phase
+      type: string
+      jsonPath: .status.phase
+    - name: Kind
+      type: string
+      jsonPath: .spec.finding.kind
+    - name: Parent
+      type: string
+      jsonPath: .spec.finding.parentObject
+    - name: Job
+      type: string
+      jsonPath: .status.jobRef
+    - name: PR
+      type: string
+      jsonPath: .status.prRef
+    - name: Age
+      type: date
+      jsonPath: .metadata.creationTimestamp
+            schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            required: [fingerprint, sourceType, finding, gitOpsRepo, gitOpsManifestRoot, agentImage, agentSA, sourceResultRef]
+            x-kubernetes-validations:
+            - rule: "self.fingerprint == oldSelf.fingerprint"
+              message: "spec.fingerprint is immutable"
+            - rule: "self.sourceType == oldSelf.sourceType"
+              message: "spec.sourceType is immutable"
+            properties:
+              fingerprint:
+                type: string
+              sourceType:
+                type: string
+                description: "Which source provider created this object, e.g. k8sgpt"
+              sourceResultRef:
+                type: object
+                required: [name, namespace]
+                properties:
+                  name: {type: string}
+                  namespace: {type: string}
+              finding:
+                type: object
+                required: [kind, name, namespace, parentObject]
+                properties:
+                  kind: {type: string}
+                  name: {type: string}
+                  namespace: {type: string}
+                  parentObject: {type: string}
+                  errors: {type: string}
+                  details: {type: string}
+              gitOpsRepo: {type: string}
+              gitOpsManifestRoot: {type: string}
+              agentImage: {type: string}
+              agentSA: {type: string}
+          status:
+            type: object
+            properties:
+              phase: {type: string}
+              jobRef: {type: string}
+              prRef: {type: string}
+              message: {type: string}
+              dispatchedAt: {type: string, format: date-time}
+              completedAt: {type: string, format: date-time}
+              conditions:
+                type: array
+                items:
+                  type: object
 ```
 
 ---
@@ -66,7 +165,7 @@ metadata:
 
 ## 4. RBAC — Watcher
 
-### 4.1 ClusterRole (read Result CRDs and Namespaces)
+### 4.1 ClusterRole (read Result CRDs, manage RemediationJobs, read Namespaces)
 
 ```yaml
 # clusterrole-watcher.yaml
@@ -81,6 +180,12 @@ rules:
 - apiGroups: [""]
   resources: ["namespaces"]
   verbs: ["get", "list"]
+- apiGroups: ["remediation.k8sgpt.ai"]
+  resources: ["remediationjobs"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["remediation.k8sgpt.ai"]
+  resources: ["remediationjobs/status"]
+  verbs: ["get", "patch", "update"]
 ```
 
 ### 4.2 ClusterRoleBinding
@@ -178,6 +283,40 @@ subjects:
   namespace: mendabot
 roleRef:
   kind: ClusterRole
+  name: mendabot-agent
+  apiGroup: rbac.authorization.k8s.io
+```
+
+### 5.3 Role (status writeback in mendabot namespace)
+
+```yaml
+# role-agent.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: mendabot-agent
+  namespace: mendabot
+rules:
+- apiGroups: ["remediation.k8sgpt.ai"]
+  resources: ["remediationjobs/status"]
+  verbs: ["get", "patch"]
+```
+
+### 5.4 RoleBinding
+
+```yaml
+# rolebinding-agent.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: mendabot-agent
+  namespace: mendabot
+subjects:
+- kind: ServiceAccount
+  name: mendabot-agent
+  namespace: mendabot
+roleRef:
+  kind: Role
   name: mendabot-agent
   apiGroup: rbac.authorization.k8s.io
 ```
@@ -347,6 +486,7 @@ kind: Kustomization
 
 resources:
 - namespace.yaml
+- crd-remediationjob.yaml
 - serviceaccount-watcher.yaml
 - serviceaccount-agent.yaml
 - clusterrole-watcher.yaml
@@ -355,6 +495,8 @@ resources:
 - clusterrolebinding-agent.yaml
 - role-watcher.yaml
 - rolebinding-watcher.yaml
+- role-agent.yaml
+- rolebinding-agent.yaml
 - configmap-prompt.yaml
 - secret-github-app.yaml
 - secret-llm.yaml
@@ -398,5 +540,6 @@ kubectl apply -k deploy/kustomize/
 
 # Verify
 kubectl -n mendabot get all
-kubectl -n mendabot get clusterrole mendabot-watcher mendabot-agent
+kubectl -n mendabot get remediationjobs
+kubectl get clusterrole mendabot-watcher mendabot-agent
 ```

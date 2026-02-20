@@ -1,9 +1,10 @@
 # Domain: OpenCode Prompt — Low-Level Design
 
-**Version:** 1.1
+**Version:** 1.2
 **Date:** 2026-02-19
 **Status:** Implementation Ready
-**HLD Reference:** [Section 9](../HLD.md)
+**HLD Reference:** [Section 10](../HLD.md)
+**Sink Reference:** [SINK_PROVIDER_LLD.md](SINK_PROVIDER_LLD.md)
 
 ---
 

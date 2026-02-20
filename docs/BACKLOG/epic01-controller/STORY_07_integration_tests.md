@@ -17,8 +17,9 @@ requiring a live cluster.
 
 ## Acceptance Criteria
 
-- [ ] `envtest` environment set up in `TestMain`
-- [ ] All 7 test cases from STORY_04 pass against the envtest API server
+- [ ] `envtest` environment set up in `TestMain` for both test packages
+- [ ] All integration tests from STORY_03 pass for `internal/provider/k8sgpt/`
+- [ ] All integration tests from STORY_04 pass for `internal/controller/`
 - [ ] Tests clean up created resources after each test
 - [ ] Tests use `Eventually` with a timeout rather than `time.Sleep`
 - [ ] Tests run in CI without a real cluster
@@ -28,8 +29,8 @@ requiring a live cluster.
 ## Tasks
 
 - [ ] Add `sigs.k8s.io/controller-runtime/pkg/envtest` to `go.mod`
-- [ ] Write `TestMain` with envtest setup/teardown
-- [ ] Implement all 7 integration test cases
+- [ ] Write `TestMain` with envtest setup/teardown in `internal/provider/k8sgpt/suite_test.go`
+- [ ] Write `TestMain` with envtest setup/teardown in `internal/controller/suite_test.go`
 - [ ] Add `KUBEBUILDER_ASSETS` env var setup to `test.yaml` CI workflow
 
 ---

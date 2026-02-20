@@ -1,17 +1,17 @@
-# Story: Builder Interface
+# Story: Domain Interfaces
 
 **Epic:** [Interfaces and Test Infrastructure](README.md)
 **Priority:** Critical
 **Status:** Not Started
-**Estimated Effort:** 30 minutes
+**Estimated Effort:** 45 minutes
 
 ---
 
 ## User Story
 
-As a **developer**, I want the job builder exposed as an interface so that the controller
-can depend on the abstraction rather than the concrete implementation, enabling unit testing
-without constructing real `batch/v1 Job` objects.
+As a **developer**, I want the job builder and source provider exposed as interfaces so
+that reconcilers depend on abstractions rather than concrete implementations, enabling
+unit testing without real Kubernetes objects or external signal sources.
 
 ---
 
@@ -20,35 +20,49 @@ without constructing real `batch/v1 Job` objects.
 - [ ] `internal/domain/interfaces.go` defines:
   ```go
   type JobBuilder interface {
-      Build(result *v1alpha1.Result, fingerprint string) (*batchv1.Job, error)
+      Build(rjob *v1alpha1.RemediationJob) (*batchv1.Job, error)
   }
   ```
-- [ ] The interface is the only thing the controller imports from the job builder package —
-  the controller never references `jobbuilder.Builder` directly
-- [ ] The concrete `*jobbuilder.Builder` satisfies this interface (verified by a compile-time
-  assertion in `internal/jobbuilder/job.go`):
+- [ ] `internal/provider/interface.go` defines:
+  ```go
+  // SourceProvider is implemented by each signal source (k8sgpt, Prometheus, etc.)
+  // Each provider registers its own reconciler(s) with the manager at startup.
+  type SourceProvider interface {
+      SetupWithManager(mgr ctrl.Manager) error
+  }
+  ```
+- [ ] The `JobBuilder` interface is the only thing the `RemediationJobReconciler` imports
+  from the job builder package — the reconciler never references `jobbuilder.Builder` directly
+- [ ] The concrete `*jobbuilder.Builder` satisfies `domain.JobBuilder` (verified by a
+  compile-time assertion in `internal/jobbuilder/job.go`):
   ```go
   var _ domain.JobBuilder = (*Builder)(nil)
   ```
-- [ ] No functional logic is added in this story — interface definition only
+- [ ] `K8sGPTSourceProvider` satisfies `provider.SourceProvider` (verified by a
+  compile-time assertion in `internal/provider/k8sgpt/provider.go`):
+  ```go
+  var _ provider.SourceProvider = (*K8sGPTSourceProvider)(nil)
+  ```
+- [ ] No functional logic is added in this story — interface definitions only
 
 ---
 
 ## Tasks
 
-- [ ] Add `JobBuilder` interface to `internal/domain/interfaces.go` (TDD: write a
-  compile-test in `interfaces_test.go` that references the interface by name)
-- [ ] Add compile-time assertion to `internal/jobbuilder/job.go` once that package exists
-  (add as a TODO comment for now if jobbuilder is not yet written)
+- [ ] Add `JobBuilder` interface to `internal/domain/interfaces.go`
+- [ ] Create `internal/provider/interface.go` with `SourceProvider` interface
+- [ ] Add compile-time assertion comments/TODOs in `internal/jobbuilder/` and
+  `internal/provider/k8sgpt/` for when those packages are created
+- [ ] Write compile-level test in `internal/domain/interfaces_test.go` that references
+  both interfaces by name (ensures they stay importable)
 
 ---
 
 ## Dependencies
 
-**Depends on:** STORY_01 (domain types — same file/package)
-**Depends on:** epic00-foundation/STORY_04 (CRD types — interface signature references `*v1alpha1.Result`)
-**Blocks:** epic01-controller (controller field `JobBuilder domain.JobBuilder`)
-**Blocks:** STORY_05 (fake implementation satisfies this interface)
+**Depends on:** STORY_01 (RemediationJob type — interface signatures use `*v1alpha1.RemediationJob`)
+**Blocks:** STORY_03 (ReconcilerSkeleton has a `JobBuilder domain.JobBuilder` field and uses provider loop)
+**Blocks:** STORY_05 (fake implementations satisfy these interfaces)
 
 ---
 
@@ -56,4 +70,5 @@ without constructing real `batch/v1 Job` objects.
 
 - [ ] `go build ./...` clean
 - [ ] `go vet ./...` clean
-- [ ] Interface is in `internal/domain` — not in `internal/controller` or `internal/jobbuilder`
+- [ ] `JobBuilder` interface lives in `internal/domain`, not in `internal/controller` or `internal/jobbuilder`
+- [ ] `SourceProvider` interface lives in `internal/provider`, not in `internal/provider/k8sgpt`

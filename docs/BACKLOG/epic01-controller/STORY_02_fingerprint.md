@@ -44,8 +44,8 @@ Deployment produce one fingerprint, not many.
 
 ## Tasks
 
-- [ ] Write all 7 tests in `result_controller_test.go` (TDD — tests first, must fail)
-- [ ] Implement `fingerprintFor()` in `result_controller.go`
+- [ ] Write all 7 tests in `internal/provider/k8sgpt/reconciler_test.go` (TDD — tests first, must fail)
+- [ ] Implement `fingerprintFor()` in `internal/provider/k8sgpt/reconciler.go`
 - [ ] Run tests — all must pass
 
 ---

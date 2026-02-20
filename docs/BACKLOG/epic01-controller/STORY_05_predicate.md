@@ -26,9 +26,9 @@ reconcile queue so the controller never dispatches an investigation for a health
 
 ## Tasks
 
-- [ ] Write predicate unit test (TDD)
-- [ ] Implement predicate in `SetupWithManager`
-- [ ] Add `Owns(&batchv1.Job{})` so Job events from owned Jobs are tracked
+- [ ] Write predicate unit test in `internal/provider/k8sgpt/reconciler_test.go` (TDD)
+- [ ] Implement predicate in `ResultReconciler.SetupWithManager` in
+  `internal/provider/k8sgpt/reconciler.go`
 
 ---
 

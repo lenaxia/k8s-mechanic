@@ -2,29 +2,37 @@
 
 ## Purpose
 
-Implement the `ResultReconciler` — the controller-runtime reconcile loop that watches
-`Result` CRDs, computes parent-resource fingerprints for deduplication, and dispatches
-agent Jobs for new findings.
+Implement the full controller layer across two packages:
+
+1. **K8sGPTSourceProvider + ResultReconciler** (`internal/provider/k8sgpt/`) — watches
+   `results.core.k8sgpt.ai`, computes fingerprints, and creates `RemediationJob` CRDs
+   (with `spec.sourceType: "k8sgpt"`) as the durable deduplication record
+2. **RemediationJobReconciler** (`internal/controller/`) — watches `RemediationJob`
+   objects, enforces concurrency limits, dispatches `batch/v1 Jobs` with ownerReferences,
+   and syncs Job status back to the `RemediationJob`
 
 ## Status: Not Started
 
 ## Dependencies
 
-- Foundation epic complete
+- epic00-foundation complete
+- epic00.1-interfaces complete (provider + reconciler structs, JobBuilder + SourceProvider interfaces, fakes, envtest suite)
 
 ## Blocks
 
-- Job Builder epic (controller calls jobbuilder)
-- Deploy epic (controller is what gets deployed)
+- epic02-jobbuilder (reconciler calls `jobBuilder.Build(rjob)`)
+- epic04-deploy (controller is what gets deployed)
 
 ## Success Criteria
 
-- [ ] Controller registers against `results.core.k8sgpt.ai` across all namespaces
-- [ ] `fingerprintFor()` produces stable, parent-aware hashes
-- [ ] In-memory processed map prevents duplicate Job creation for the same fingerprint
+- [ ] `ResultReconciler` creates a `RemediationJob` (with `sourceType="k8sgpt"`) for each new unique fingerprint
+- [ ] `ResultReconciler` skips Results whose fingerprint already has a non-Failed `RemediationJob`
+- [ ] `ResultReconciler` deletes Pending/Dispatched `RemediationJob` when its source Result is deleted
+- [ ] `RemediationJobReconciler` creates a `batch/v1 Job` with the correct ownerReference
+- [ ] `RemediationJobReconciler` enforces `MAX_CONCURRENT_JOBS`
+- [ ] `RemediationJobReconciler` syncs Job status back to `RemediationJob.Status.Phase`
 - [ ] Results with zero errors are filtered out before entering the reconcile queue
-- [ ] On watcher restart, `IsAlreadyExists` is handled gracefully
-- [ ] All unit tests for `fingerprintFor` pass (see test table in CONTROLLER_LLD.md)
+- [ ] All unit tests for `fingerprintFor` pass (see test table in CONTROLLER_LLD.md §11)
 - [ ] All integration tests using envtest pass
 
 ## Stories
@@ -33,26 +41,27 @@ agent Jobs for new findings.
 |-------|------|--------|
 | Result CRD scheme registration | [STORY_01_scheme.md](STORY_01_scheme.md) | Not Started |
 | fingerprintFor implementation + tests | [STORY_02_fingerprint.md](STORY_02_fingerprint.md) | Not Started |
-| In-memory processed map | [STORY_03_dedup_map.md](STORY_03_dedup_map.md) | Not Started |
-| Reconcile loop (dispatch path) | [STORY_04_reconcile.md](STORY_04_reconcile.md) | Not Started |
-| Error-filter predicate | [STORY_05_predicate.md](STORY_05_predicate.md) | Not Started |
-| Manager setup and wiring in main.go | [STORY_06_manager.md](STORY_06_manager.md) | Not Started |
+| ResultReconciler — RemediationJob creation | [STORY_03_result_reconciler.md](STORY_03_result_reconciler.md) | Not Started |
+| RemediationJobReconciler — Job dispatch | [STORY_04_remediationjob_reconciler.md](STORY_04_remediationjob_reconciler.md) | Not Started |
+| Job status sync (Owns + phase mapping) | [STORY_05_status_sync.md](STORY_05_status_sync.md) | Not Started |
+| Error-filter predicate | [STORY_06_predicate.md](STORY_06_predicate.md) | Not Started |
 | Integration tests (envtest) | [STORY_07_integration_tests.md](STORY_07_integration_tests.md) | Not Started |
 
 ## Technical Overview
 
-The controller is the heart of the watcher. Its correctness is critical — bugs here
-cause either missed investigations (false negatives) or duplicate Jobs (false positives).
+The controller layer is specified in [`docs/DESIGN/lld/CONTROLLER_LLD.md`](../../DESIGN/lld/CONTROLLER_LLD.md).
 
-The deduplication strategy is documented in detail in
-[`docs/DESIGN/lld/CONTROLLER_LLD.md`](../../DESIGN/lld/CONTROLLER_LLD.md).
+The key architectural split:
+- `ResultReconciler` lives in `internal/provider/k8sgpt/` — it is the k8sgpt source
+  provider's implementation detail, not a generic controller.
+- `RemediationJobReconciler` lives in `internal/controller/` — it is provider-agnostic.
 
-TDD is mandatory for this epic. Write `fingerprintFor` tests before writing
-`fingerprintFor`. Write reconcile tests before wiring the reconciler.
+TDD is mandatory. Write `fingerprintFor` tests before implementing it. Write reconciler
+tests before implementing the reconciler body.
 
 ## Definition of Done
 
 - [ ] All unit tests pass with race detector
 - [ ] All envtest integration tests pass
 - [ ] `go vet` is clean
-- [ ] Controller LLD test table fully covered
+- [ ] CONTROLLER_LLD.md test table fully covered

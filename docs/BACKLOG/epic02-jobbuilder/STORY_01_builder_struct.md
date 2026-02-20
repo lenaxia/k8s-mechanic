@@ -17,9 +17,14 @@ job builder has a clean, testable entry point with all configuration injected at
 ## Acceptance Criteria
 
 - [ ] `Config` struct defined with all fields from JOBBUILDER_LLD.md §3
-- [ ] `Builder` struct holds a `Config`
-- [ ] `New(cfg Config) *Builder` constructor validates that no required field is empty,
-  returning an error if any is missing
+  (note: this is `domain.JobBuilderConfig` — defined in epic00.1/STORY_01; the jobbuilder
+  package uses that type directly, not its own duplicate)
+- [ ] `Builder` struct holds a `domain.JobBuilderConfig`
+- [ ] `New(cfg domain.JobBuilderConfig) *Builder` constructor validates no required field
+  is empty, returning an error if any is missing
+- [ ] Compile-time assertion `var _ domain.JobBuilder = (*Builder)(nil)` is present
+- [ ] `Build(*v1alpha1.RemediationJob) (*batchv1.Job, error)` method signature matches the
+  `domain.JobBuilder` interface
 - [ ] Unit tests: valid config constructs successfully; each required field missing returns
   a descriptive error
 

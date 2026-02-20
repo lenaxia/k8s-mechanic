@@ -21,8 +21,10 @@ watcher binary is runnable end-to-end.
 - [ ] `LeaderElection: false` (single replica, no election needed)
 - [ ] Metrics server on `:8080`, health probe on `:8081`
 - [ ] `healthz.Ping` registered for both `/healthz` and `/readyz`
-- [ ] `ResultReconciler` instantiated with config, logger, and jobbuilder
-- [ ] `SetupWithManager(mgr)` called
+- [ ] `RemediationJobReconciler` instantiated with config, logger, and jobbuilder, and
+  registered via `SetupWithManager`
+- [ ] Provider loop registers all source providers:
+  `[]provider.SourceProvider{k8sgpt.NewProvider(cfg, logger)}`
 - [ ] `mgr.Start(ctrl.SetupSignalHandler())` called — blocks until signal received
 - [ ] `log.Fatal` on any setup error (fail fast, never silently start degraded)
 

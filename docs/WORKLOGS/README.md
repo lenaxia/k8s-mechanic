@@ -36,3 +36,4 @@ else.
 | [0014](0014_2026-02-20_epic03-agent-image-complete.md) | 2026-02-20 | Epic 03: Dockerfile.agent, entrypoint, token script, smoke test; 14 gaps fixed | Complete |
 | [0015](0015_2026-02-20_robustness-audit.md) | 2026-02-20 | Robustness audit: Fingerprint error return, PhaseCancelled, 21 findings fixed | Complete |
 | [0016](0016_2026-02-20_epic04-deploy-manifests.md) | 2026-02-20 | Epic 04: Kustomize manifests — namespace, CRD, RBAC, secrets, deployment | Complete |
+| [0017](0017_2026-02-20_epic05-prompt-complete.md) | 2026-02-20 | Epic 05: Prompt configmap + entrypoint hardening; 5 gaps fixed including critical opencode run bug | Complete |

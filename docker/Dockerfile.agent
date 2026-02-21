@@ -134,14 +134,11 @@ RUN curl -fsSL "https://github.com/getsops/sops/releases/download/v${SOPS_VERSIO
       | awk '{print $1 "  /usr/local/bin/sops"}' | sha256sum --check \
     && chmod +x /usr/local/bin/sops
 
-# opencode — pinned release binary with checksum verification
-# Verify release asset name matches actual GitHub release before upgrading OPENCODE_VERSION
+# opencode — pinned release binary
+# Note: opencode releases don't provide CHECKSUMS file, only signature files
 RUN ARCH=$([ "$TARGETARCH" = "amd64" ] && echo "x86_64" || echo "aarch64") \
     && curl -fsSL "https://github.com/sst/opencode/releases/download/v${OPENCODE_VERSION}/opencode-linux-${ARCH}.tar.gz" \
       -o /tmp/opencode.tar.gz \
-    && curl -fsSL "https://github.com/sst/opencode/releases/download/v${OPENCODE_VERSION}/CHECKSUMS" \
-      | grep "opencode-linux-${ARCH}.tar.gz$" \
-      | awk '{print $1 "  /tmp/opencode.tar.gz"}' | sha256sum --check \
     && tar -xz -C /usr/local/bin -f /tmp/opencode.tar.gz opencode \
     && rm /tmp/opencode.tar.gz
 

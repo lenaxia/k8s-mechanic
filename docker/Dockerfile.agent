@@ -165,6 +165,10 @@ RUN chmod +x /usr/local/bin/get-github-app-token.sh
 COPY scripts/agent-entrypoint.sh /usr/local/bin/agent-entrypoint.sh
 RUN chmod +x /usr/local/bin/agent-entrypoint.sh
 
+# Smoke test: verifies all expected binaries are present and executable
+COPY scripts/smoke-test.sh /usr/local/bin/smoke-test.sh
+RUN chmod +x /usr/local/bin/smoke-test.sh
+
 USER agent
 WORKDIR /workspace
 

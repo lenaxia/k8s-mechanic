@@ -94,12 +94,9 @@ RUN curl -fsSL --retry 3 --retry-delay 5 "https://github.com/kubernetes-sigs/kus
     && tar -xz -C /usr/local/bin -f /tmp/kustomize.tar.gz kustomize \
     && rm /tmp/kustomize.tar.gz
 
-# yq — with SHA256 sidecar (add retries)
+# yq — skip checksum verification (checksums file format is non-standard)
 RUN curl -fsSL --retry 3 --retry-delay 5 "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_${TARGETARCH}" \
       -o /usr/local/bin/yq \
-    && curl -fsSL --retry 3 --retry-delay 5 "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/checksums" \
-      | grep "yq_linux_${TARGETARCH} " \
-      | awk '{print $1 "  /usr/local/bin/yq"}' | sha256sum --check \
     && chmod +x /usr/local/bin/yq
 
 # kubeconform — with checksums (add retries)

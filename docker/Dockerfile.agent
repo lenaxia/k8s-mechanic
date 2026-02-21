@@ -119,12 +119,10 @@ RUN curl -fsSL "https://github.com/stern/stern/releases/download/v${STERN_VERSIO
     && tar -xz -C /usr/local/bin -f /tmp/stern.tar.gz stern \
     && rm /tmp/stern.tar.gz
 
-# age — with checksums
+# age — age releases don't provide CHECKSUMS file, only provenance .proof files
+# Skip checksum verification for age to match upstream release process
 RUN curl -fsSL "https://github.com/FiloSottile/age/releases/download/v${AGE_VERSION}/age-v${AGE_VERSION}-linux-${TARGETARCH}.tar.gz" \
       -o /tmp/age.tar.gz \
-    && curl -fsSL "https://github.com/FiloSottile/age/releases/download/v${AGE_VERSION}/CHECKSUMS" \
-      | grep "age-v${AGE_VERSION}-linux-${TARGETARCH}.tar.gz$" \
-      | awk '{print $1 "  /tmp/age.tar.gz"}' | sha256sum --check \
     && tar -xz -C /usr/local/bin --strip-components=1 -f /tmp/age.tar.gz "age/age" "age/age-keygen" \
     && rm /tmp/age.tar.gz
 

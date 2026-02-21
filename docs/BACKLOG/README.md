@@ -17,15 +17,15 @@ the epic and individual story files for each unit of work.
 
 | Epic | Folder | Description | Depends On | Status |
 |------|--------|-------------|------------|--------|
-| epic00 — Foundation | [epic00-foundation/](epic00-foundation/) | Go module, project structure, config, CI skeleton | — | Not Started |
-| epic00.1 — Interfaces | [epic00.1-interfaces/](epic00.1-interfaces/) | RemediationJob CRD types, JobBuilder interface, reconciler skeletons, envtest suite, fakes | epic00 | Not Started |
-| epic01 — Controller | [epic01-controller/](epic01-controller/) | SourceProviderReconciler + RemediationJobReconciler | epic00, epic00.1 | Not Started |
-| epic02 — Job Builder | [epic02-jobbuilder/](epic02-jobbuilder/) | Agent Job spec construction from RemediationJob | epic00.1, epic01 | Not Started |
-| epic03 — Agent Image | [epic03-agent-image/](epic03-agent-image/) | Dockerfile, tool install, entrypoint script | epic00 | Not Started |
-| epic04 — Deploy | [epic04-deploy/](epic04-deploy/) | Kustomize manifests, RBAC, Secrets | epic01, epic02, epic03 | Not Started |
-| epic05 — Prompt | [epic05-prompt/](epic05-prompt/) | OpenCode prompt design and ConfigMap | epic04 | Not Started |
-| epic06 — CI/CD | [epic06-ci-cd/](epic06-ci-cd/) | GitHub Actions workflows for both images | epic03, epic00 | Not Started |
-| epic07 — Technical Debt | [epic07-technical-debt/](epic07-technical-debt/) | Issues and improvements discovered during implementation | — | Not Started |
+| epic00 — Foundation | [epic00-foundation/](epic00-foundation/) | Go module, project structure, config, CI skeleton | — | Complete |
+| epic00.1 — Interfaces | [epic00.1-interfaces/](epic00.1-interfaces/) | RemediationJob CRD types, JobBuilder interface, reconciler skeletons, envtest suite, fakes | epic00 | Complete |
+| epic01 — Controller | [epic01-controller/](epic01-controller/) | SourceProviderReconciler + RemediationJobReconciler | epic00, epic00.1 | Complete |
+| epic02 — Job Builder | [epic02-jobbuilder/](epic02-jobbuilder/) | Agent Job spec construction from RemediationJob | epic00.1, epic01 | Complete |
+| epic03 — Agent Image | [epic03-agent-image/](epic03-agent-image/) | Dockerfile, tool install, entrypoint script | epic00 | Complete |
+| epic04 — Deploy | [epic04-deploy/](epic04-deploy/) | Kustomize manifests, RBAC, Secrets | epic01, epic02, epic03 | Complete |
+| epic05 — Prompt | [epic05-prompt/](epic05-prompt/) | OpenCode prompt design and ConfigMap | epic04 | Complete |
+| epic06 — CI/CD | [epic06-ci-cd/](epic06-ci-cd/) | GitHub Actions workflows for both images | epic03, epic00 | Complete |
+| epic07 — Technical Debt | [epic07-technical-debt/](epic07-technical-debt/) | Issues and improvements discovered during implementation | — | Ongoing |
 
 ## Implementation Order
 

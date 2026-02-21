@@ -7,7 +7,7 @@ functional epic begins. This epic produces no observable runtime behaviour — i
 the skeleton that epics 01 and 02 fill in. Getting these right first prevents costly
 refactoring later.
 
-## Status: Not Started
+## Status: Complete
 
 ## Dependencies
 
@@ -22,25 +22,25 @@ refactoring later.
 
 | Story | File | Status |
 |-------|------|--------|
-| Core domain types | [STORY_01_domain_types.md](STORY_01_domain_types.md) | Not Started |
-| Builder interface | [STORY_02_builder_interface.md](STORY_02_builder_interface.md) | Not Started |
-| Reconciler interface and struct skeleton | [STORY_03_reconciler_skeleton.md](STORY_03_reconciler_skeleton.md) | Not Started |
-| envtest suite setup | [STORY_04_envtest_suite.md](STORY_04_envtest_suite.md) | Not Started |
-| Fake/stub implementations | [STORY_05_fakes.md](STORY_05_fakes.md) | Not Started |
+| Core domain types | [STORY_01_domain_types.md](STORY_01_domain_types.md) | Complete |
+| Builder interface | [STORY_02_builder_interface.md](STORY_02_builder_interface.md) | Complete |
+| Reconciler interface and struct skeleton | [STORY_03_reconciler_skeleton.md](STORY_03_reconciler_skeleton.md) | Complete |
+| envtest suite setup | [STORY_04_envtest_suite.md](STORY_04_envtest_suite.md) | Complete |
+| Fake/stub implementations | [STORY_05_fakes.md](STORY_05_fakes.md) | Complete |
 
 ## Success Criteria
 
-- [ ] All interfaces compile and are reachable from the packages that will use them
-- [ ] `SourceProvider`, `Finding`, `SourceRef` defined in `internal/domain/provider.go`
-- [ ] `JobBuilder` interface defined in `internal/domain/interfaces.go`
-- [ ] envtest suite bootstraps a real API server and tears it down cleanly
-- [ ] Fake `JobBuilder` exists and is usable in controller unit tests without a cluster
-- [ ] `go build ./...` and `go vet ./...` are clean
-- [ ] No functional logic implemented — only types, interfaces, and test plumbing
+- [x] All interfaces compile and are reachable from the packages that will use them
+- [x] `SourceProvider`, `Finding`, `SourceRef` defined in `internal/domain/provider.go`
+- [x] `JobBuilder` interface defined in `internal/domain/interfaces.go`
+- [x] envtest suite bootstraps a real API server and tears it down cleanly
+- [x] Fake `JobBuilder` exists and is usable in controller unit tests without a cluster
+- [x] `go build ./...` and `go vet ./...` are clean
+- [x] No functional logic implemented — only types, interfaces, and test plumbing
 
 ## Definition of Done
 
-- [ ] All tests in this epic pass with `-race`
-- [ ] `go vet ./...` clean
-- [ ] `go build ./...` clean
-- [ ] Downstream epics can reference these types without circular imports
+- [x] All tests in this epic pass with `-race`
+- [x] `go vet ./...` clean
+- [x] `go build ./...` clean
+- [x] Downstream epics can reference these types without circular imports

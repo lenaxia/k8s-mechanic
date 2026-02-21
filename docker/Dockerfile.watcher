@@ -1,0 +1,46 @@
+# syntax=docker/dockerfile:1
+
+# ── Build stage ──────────────────────────────────────────────────────────────
+FROM golang:1.23-bookworm AS builder
+
+ARG TARGETARCH=amd64
+ARG WATCHER_VERSION=dev
+
+WORKDIR /src
+
+# Cache dependency downloads separately from source compilation.
+# Copy go.mod and go.sum first; only re-download if they change.
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source and build.
+# CGO_ENABLED=0  → fully static binary, no libc dependency in the final image
+# -trimpath      → remove local build paths from the binary (reproducibility)
+# -ldflags       → strip debug info (-s -w) and embed version string
+COPY . .
+RUN mkdir -p /out \
+    && CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
+    go build \
+      -trimpath \
+      -ldflags="-s -w -X main.Version=${WATCHER_VERSION}" \
+      -o /out/watcher \
+      ./cmd/watcher
+
+# ── Runtime stage ────────────────────────────────────────────────────────────
+FROM debian:bookworm-slim
+
+# Install only CA certificates (required for the in-cluster API server TLS connection
+# and for calling the Kubernetes API using the ServiceAccount token).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Non-root user
+RUN useradd -u 1000 -m -s /bin/sh watcher
+
+# Copy only the compiled binary from the builder stage
+COPY --from=builder /out/watcher /usr/local/bin/watcher
+
+USER watcher
+
+ENTRYPOINT ["/usr/local/bin/watcher"]

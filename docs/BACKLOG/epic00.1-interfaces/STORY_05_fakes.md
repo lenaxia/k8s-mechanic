@@ -2,7 +2,7 @@
 
 **Epic:** [Interfaces and Test Infrastructure](README.md)
 **Priority:** High
-**Status:** Not Started
+**Status:** Complete
 **Estimated Effort:** 1 hour
 
 ---
@@ -17,7 +17,7 @@ objects or touching the Kubernetes API.
 
 ## Acceptance Criteria
 
-- [ ] `internal/controller/fakes_test.go` (package `controller_test`) defines:
+- [x] `internal/controller/fakes_test.go` (package `controller_test`) defines:
 
   ```go
   type fakeJobBuilder struct {
@@ -36,12 +36,12 @@ objects or touching the Kubernetes API.
   }
   ```
 
-- [ ] `fakeJobBuilder` satisfies `domain.JobBuilder` — verified by a compile-time assertion:
+- [x] `fakeJobBuilder` satisfies `domain.JobBuilder` — verified by a compile-time assertion:
   ```go
   var _ domain.JobBuilder = (*fakeJobBuilder)(nil)
   ```
 
-- [ ] `internal/provider/k8sgpt/fakes_test.go` (package `k8sgpt_test`) defines:
+- [x] `internal/provider/k8sgpt/fakes_test.go` (package `k8sgpt_test`) defines:
 
   ```go
   // No fake needed for SourceProvider in unit tests — SourceProviderReconciler
@@ -51,7 +51,7 @@ objects or touching the Kubernetes API.
   For now, `K8sGPTProvider` is tested by exercising `SourceProviderReconciler`
   directly in envtest integration tests (no fake needed).
 
-- [ ] A `defaultFakeJob(rjob *v1alpha1.RemediationJob) *batchv1.Job` helper returns a
+- [x] A `defaultFakeJob(rjob *v1alpha1.RemediationJob) *batchv1.Job` helper returns a
   minimal valid `*batchv1.Job` with:
   - Correct name (`mendabot-agent-<fp[:12]>`)
   - Correct namespace
@@ -64,7 +64,7 @@ objects or touching the Kubernetes API.
   This allows controller tests to call `fakeJobBuilder.returnJob = defaultFakeJob(rjob)`
   and proceed past the `Build()` call without asserting on the full Job spec.
 
-- [ ] Unit tests in `fakes_test.go` verify:
+- [x] Unit tests in `fakes_test.go` verify:
   - `fakeJobBuilder.Build()` records each call
   - `fakeJobBuilder` with `returnErr != nil` propagates the error
   - `defaultFakeJob()` returns a Job with the correct name pattern
@@ -83,9 +83,9 @@ fake — controller integration tests use envtest's real client.
 
 ## Tasks
 
-- [ ] Create `internal/controller/fakes_test.go` with `fakeJobBuilder`,
+- [x] Create `internal/controller/fakes_test.go` with `fakeJobBuilder`,
   `fakeJobBuilderCall`, `defaultFakeJob()`, and the compile-time assertion
-- [ ] Write unit tests for the fake itself (TDD — fakes need tests too)
+- [x] Write unit tests for the fake itself (TDD — fakes need tests too)
 
 ---
 
@@ -99,6 +99,6 @@ fake — controller integration tests use envtest's real client.
 
 ## Definition of Done
 
-- [ ] Tests pass with `-race`
-- [ ] `go vet` clean
-- [ ] Compile-time interface assertion present
+- [x] Tests pass with `-race`
+- [x] `go vet` clean
+- [x] Compile-time interface assertion present

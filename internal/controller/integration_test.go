@@ -423,6 +423,15 @@ func TestRemediationJobReconciler_MaxConcurrentJobs_Requeues(t *testing.T) {
 	if len(jobList.Items) != 0 {
 		t.Errorf("expected 0 new jobs, got %d", len(jobList.Items))
 	}
+
+	// Phase must be set to Pending — a blank phase is confusing in kubectl.
+	var updated v1alpha1.RemediationJob
+	if err := c.Get(ctx, client.ObjectKey{Name: rjob.Name, Namespace: rjob.Namespace}, &updated); err != nil {
+		t.Fatalf("get rjob: %v", err)
+	}
+	if updated.Status.Phase != v1alpha1.PhasePending {
+		t.Errorf("expected Phase=%s, got %s", v1alpha1.PhasePending, updated.Status.Phase)
+	}
 }
 
 // TestRemediationJobReconciler_OwnerReference verifies: Created Job has ownerRef →

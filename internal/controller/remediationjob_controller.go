@@ -122,6 +122,16 @@ func (r *RemediationJobReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 	}
 	if r.Cfg.MaxConcurrentJobs > 0 && activeCount >= r.Cfg.MaxConcurrentJobs {
+		// Set Phase=Pending so the RemediationJob is visibly waiting rather than
+		// showing a blank phase in kubectl. A blank phase before Dispatched is
+		// confusing; Pending is the documented meaning of "created but no Job yet".
+		if rjob.Status.Phase != v1alpha1.PhasePending {
+			rjobCopy := rjob.DeepCopyObject().(*v1alpha1.RemediationJob)
+			rjob.Status.Phase = v1alpha1.PhasePending
+			if err := r.Status().Patch(ctx, &rjob, client.MergeFrom(rjobCopy)); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 

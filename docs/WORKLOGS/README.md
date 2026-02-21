@@ -32,3 +32,4 @@ else.
 | [0010](0010_2026-02-20_epic00.1-story03-reconciler-skeletons.md) | 2026-02-20 | Epic 00.1 S03: reconciler/provider/jobbuilder skeletons + main.go wiring | Complete |
 | [0011](0011_2026-02-20_epic01-controller-core-logic.md) | 2026-02-20 | Epic 01 S02–S05: fingerprintFor, K8sGPTProvider, SourceProviderReconciler, RemediationJobReconciler | Complete |
 | [0012](0012_2026-02-20_story07-integration-tests.md) | 2026-02-20 | Epic 01 S07: 13 envtest integration tests + 3 bug fixes | Complete |
+| [0013](0013_2026-02-20_epic02-jobbuilder-complete.md) | 2026-02-20 | Epic 02: Build() pure function, 28 tests, 9-gap review cycle | Complete |

@@ -4,25 +4,23 @@ import (
 	"fmt"
 
 	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/lenaxia/k8s-mendabot/api/v1alpha1"
 	"github.com/lenaxia/k8s-mendabot/internal/domain"
 )
 
-// Compile-time assertion: Builder satisfies domain.JobBuilder.
 var _ domain.JobBuilder = (*Builder)(nil)
 
-// Config holds the configuration for a Builder.
 type Config struct {
-	AgentNamespace string // namespace where Jobs are created — must equal watcher namespace
+	AgentNamespace string
 }
 
-// Builder constructs batch/v1 Jobs from RemediationJob CRDs.
 type Builder struct {
 	cfg Config
 }
 
-// New creates a new Builder. Returns an error if AgentNamespace is empty.
 func New(cfg Config) (*Builder, error) {
 	if cfg.AgentNamespace == "" {
 		return nil, fmt.Errorf("jobbuilder: AgentNamespace must not be empty")
@@ -30,7 +28,213 @@ func New(cfg Config) (*Builder, error) {
 	return &Builder{cfg: cfg}, nil
 }
 
-// Build constructs a batch/v1 Job from a RemediationJob.
+func ptr[T any](v T) *T { return &v }
+
+const initScript = `#!/bin/bash
+set -euo pipefail
+
+TOKEN=$(get-github-app-token.sh)
+printf '%s' "$TOKEN" > /workspace/github-token
+
+git clone "https://x-access-token:${TOKEN}@github.com/${GITOPS_REPO}.git" /workspace/repo`
+
 func (b *Builder) Build(rjob *v1alpha1.RemediationJob) (*batchv1.Job, error) {
-	panic("not implemented")
+	if rjob == nil {
+		return nil, fmt.Errorf("jobbuilder: RemediationJob must not be nil")
+	}
+	if len(rjob.Spec.Fingerprint) < 12 {
+		return nil, fmt.Errorf("jobbuilder: Fingerprint must be at least 12 characters, got %d", len(rjob.Spec.Fingerprint))
+	}
+
+	jobName := "mendabot-agent-" + rjob.Spec.Fingerprint[:12]
+
+	initContainer := corev1.Container{
+		Name:    "git-token-clone",
+		Image:   rjob.Spec.AgentImage,
+		Command: []string{"/bin/bash", "-c"},
+		Args:    []string{initScript},
+		Env: []corev1.EnvVar{
+			{
+				Name: "GITHUB_APP_ID",
+				ValueFrom: &corev1.EnvVarSource{
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "github-app"},
+						Key:                  "app-id",
+					},
+				},
+			},
+			{
+				Name: "GITHUB_APP_INSTALLATION_ID",
+				ValueFrom: &corev1.EnvVarSource{
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "github-app"},
+						Key:                  "installation-id",
+					},
+				},
+			},
+			{
+				Name: "GITHUB_APP_PRIVATE_KEY",
+				ValueFrom: &corev1.EnvVarSource{
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "github-app"},
+						Key:                  "private-key",
+					},
+				},
+			},
+			{
+				Name:  "GITOPS_REPO",
+				Value: rjob.Spec.GitOpsRepo,
+			},
+		},
+		VolumeMounts: []corev1.VolumeMount{
+			{
+				Name:      "shared-workspace",
+				MountPath: "/workspace",
+			},
+			{
+				Name:      "github-app-secret",
+				MountPath: "/secrets/github-app",
+				ReadOnly:  true,
+			},
+		},
+		SecurityContext: &corev1.SecurityContext{
+			AllowPrivilegeEscalation: ptr(false),
+			Capabilities: &corev1.Capabilities{
+				Drop: []corev1.Capability{"ALL"},
+			},
+		},
+	}
+
+	mainContainer := corev1.Container{
+		Name:  "mendabot-agent",
+		Image: rjob.Spec.AgentImage,
+		Env: []corev1.EnvVar{
+			{Name: "FINDING_KIND", Value: rjob.Spec.Finding.Kind},
+			{Name: "FINDING_NAME", Value: rjob.Spec.Finding.Name},
+			{Name: "FINDING_NAMESPACE", Value: rjob.Spec.Finding.Namespace},
+			{Name: "FINDING_PARENT", Value: rjob.Spec.Finding.ParentObject},
+			{Name: "FINDING_ERRORS", Value: rjob.Spec.Finding.Errors},
+			{Name: "FINDING_DETAILS", Value: rjob.Spec.Finding.Details},
+			{Name: "FINDING_FINGERPRINT", Value: rjob.Spec.Fingerprint},
+			{Name: "GITOPS_REPO", Value: rjob.Spec.GitOpsRepo},
+			{Name: "GITOPS_MANIFEST_ROOT", Value: rjob.Spec.GitOpsManifestRoot},
+			{Name: "SINK_TYPE", Value: rjob.Spec.SinkType},
+			{
+				Name: "OPENAI_API_KEY",
+				ValueFrom: &corev1.EnvVarSource{
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "llm-credentials"},
+						Key:                  "api-key",
+					},
+				},
+			},
+			{
+				Name: "OPENAI_BASE_URL",
+				ValueFrom: &corev1.EnvVarSource{
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "llm-credentials"},
+						Key:                  "base-url",
+					},
+				},
+			},
+			{
+				Name: "OPENAI_MODEL",
+				ValueFrom: &corev1.EnvVarSource{
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "llm-credentials"},
+						Key:                  "model",
+					},
+				},
+			},
+		},
+		VolumeMounts: []corev1.VolumeMount{
+			{
+				Name:      "shared-workspace",
+				MountPath: "/workspace",
+			},
+			{
+				Name:      "prompt-configmap",
+				MountPath: "/prompt",
+				ReadOnly:  true,
+			},
+		},
+		SecurityContext: &corev1.SecurityContext{
+			AllowPrivilegeEscalation: ptr(false),
+			Capabilities: &corev1.Capabilities{
+				Drop: []corev1.Capability{"ALL"},
+			},
+		},
+	}
+
+	volumes := []corev1.Volume{
+		{
+			Name: "shared-workspace",
+			VolumeSource: corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{},
+			},
+		},
+		{
+			Name: "prompt-configmap",
+			VolumeSource: corev1.VolumeSource{
+				ConfigMap: &corev1.ConfigMapVolumeSource{
+					LocalObjectReference: corev1.LocalObjectReference{Name: "opencode-prompt"},
+				},
+			},
+		},
+		{
+			Name: "github-app-secret",
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{
+					SecretName: "github-app",
+				},
+			},
+		},
+	}
+
+	job := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      jobName,
+			Namespace: b.cfg.AgentNamespace,
+			Labels: map[string]string{
+				"app.kubernetes.io/managed-by":            "mendabot-watcher",
+				"remediation.mendabot.io/fingerprint":     rjob.Spec.Fingerprint[:12],
+				"remediation.mendabot.io/remediation-job": rjob.Name,
+				"remediation.mendabot.io/finding-kind":    rjob.Spec.Finding.Kind,
+			},
+			Annotations: map[string]string{
+				"remediation.mendabot.io/fingerprint-full": rjob.Spec.Fingerprint,
+				"remediation.mendabot.io/finding-parent":   rjob.Spec.Finding.ParentObject,
+			},
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion:         "remediation.mendabot.io/v1alpha1",
+					Kind:               "RemediationJob",
+					Name:               rjob.Name,
+					UID:                rjob.UID,
+					Controller:         ptr(true),
+					BlockOwnerDeletion: ptr(true),
+				},
+			},
+		},
+		Spec: batchv1.JobSpec{
+			BackoffLimit:            ptr(int32(1)),
+			ActiveDeadlineSeconds:   ptr(int64(900)),
+			TTLSecondsAfterFinished: ptr(int32(86400)),
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					ServiceAccountName: rjob.Spec.AgentSA,
+					RestartPolicy:      corev1.RestartPolicyNever,
+					SecurityContext: &corev1.PodSecurityContext{
+						RunAsNonRoot: ptr(true),
+						RunAsUser:    ptr(int64(1000)),
+					},
+					InitContainers: []corev1.Container{initContainer},
+					Containers:     []corev1.Container{mainContainer},
+					Volumes:        volumes,
+				},
+			},
+		},
+	}
+
+	return job, nil
 }

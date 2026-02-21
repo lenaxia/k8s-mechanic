@@ -47,6 +47,7 @@ func defaultFakeJob(rjob *v1alpha1.RemediationJob) *batchv1.Job {
 			},
 			Labels: map[string]string{
 				"remediation.mendabot.io/remediation-job": rjob.Name,
+				"app.kubernetes.io/managed-by":            "mendabot-watcher",
 			},
 		},
 		Spec: batchv1.JobSpec{

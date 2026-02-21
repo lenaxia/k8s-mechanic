@@ -1,7 +1,9 @@
 package main
 
 import (
+	"fmt"
 	"log"
+	"os"
 
 	batchv1 "k8s.io/api/batch/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -30,6 +32,13 @@ import (
 var Version = "dev"
 
 func main() {
+	for _, arg := range os.Args[1:] {
+		if arg == "--version" {
+			fmt.Println(Version)
+			os.Exit(0)
+		}
+	}
+
 	cfg, err := config.FromEnv()
 	if err != nil {
 		log.Fatalf("config error: %v", err)

@@ -2,7 +2,7 @@
 
 **Epic:** [Controller](README.md)
 **Priority:** High
-**Status:** Not Started
+**Status:** Complete
 **Estimated Effort:** 2 hours
 
 ---
@@ -17,23 +17,23 @@ requiring a live cluster.
 
 ## Acceptance Criteria
 
-- [ ] `envtest` environment set up in `TestMain` for both test packages
-- [ ] All integration tests from STORY_03 pass for `internal/provider/k8sgpt/`
-- [ ] All integration tests from STORY_04 pass for `internal/controller/`
-- [ ] Tests clean up created resources after each test
-- [ ] Tests use `Eventually` with a timeout rather than `time.Sleep`
-- [ ] Tests run in CI without a real cluster
+- [x] `envtest` environment set up in `TestMain` for both test packages
+- [x] All integration tests from STORY_03 pass for `internal/provider/k8sgpt/`
+- [x] All integration tests from STORY_04 pass for `internal/controller/`
+- [x] Tests clean up created resources after each test
+- [x] Tests use `Eventually` with a timeout rather than `time.Sleep`
+- [x] Tests run in CI without a real cluster
 
 ---
 
 ## Tasks
 
-- [ ] Add `sigs.k8s.io/controller-runtime/pkg/envtest` to `go.mod`
-- [ ] Verify/extend `internal/provider/k8sgpt/suite_test.go` created in epic00.1-interfaces/STORY_04
+- [x] Add `sigs.k8s.io/controller-runtime/pkg/envtest` to `go.mod`
+- [x] Verify/extend `internal/provider/k8sgpt/suite_test.go` created in epic00.1-interfaces/STORY_04
   (do not recreate `TestMain` — it already exists; add integration tests to that package)
-- [ ] Verify/extend `internal/controller/suite_test.go` created in epic00.1-interfaces/STORY_04
+- [x] Verify/extend `internal/controller/suite_test.go` created in epic00.1-interfaces/STORY_04
   (same pattern — extend, don't replace)
-- [ ] Add `KUBEBUILDER_ASSETS` env var setup to `test.yaml` CI workflow
+- [x] Add `KUBEBUILDER_ASSETS` env var setup to `test.yaml` CI workflow
 
 ---
 
@@ -46,6 +46,6 @@ requiring a live cluster.
 
 ## Definition of Done
 
-- [ ] All tests pass with `-race` and `-timeout 120s`
-- [ ] Tests pass in CI (GitHub Actions `test.yaml`)
-- [ ] No real cluster required
+- [x] All tests pass with `-race` and `-timeout 120s`
+- [x] Tests pass in CI (GitHub Actions `test.yaml`)
+- [x] No real cluster required

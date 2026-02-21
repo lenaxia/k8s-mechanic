@@ -38,7 +38,7 @@ func TestMain(m *testing.M) {
 
 	if assets != "" {
 		testEnv = &envtest.Environment{
-			CRDDirectoryPaths: []string{"../../testdata/crds"},
+			CRDDirectoryPaths: []string{"../../../testdata/crds"},
 		}
 		var err error
 		cfg, err = testEnv.Start()

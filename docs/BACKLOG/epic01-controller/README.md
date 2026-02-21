@@ -11,7 +11,7 @@ Implement the full controller layer across two packages:
    objects, enforces concurrency limits, dispatches `batch/v1 Jobs` with ownerReferences,
    and syncs Job status back to the `RemediationJob`
 
-## Status: Not Started
+## Status: Complete
 
 ## Dependencies
 
@@ -25,27 +25,27 @@ Implement the full controller layer across two packages:
 
 ## Success Criteria
 
-- [ ] `SourceProviderReconciler` creates a `RemediationJob` (with `sourceType="k8sgpt"`) for each new unique fingerprint
-- [ ] `SourceProviderReconciler` skips Results whose fingerprint already has a non-Failed `RemediationJob`
-- [ ] `SourceProviderReconciler` deletes Pending/Dispatched `RemediationJob` when its source Result is deleted
-- [ ] `RemediationJobReconciler` creates a `batch/v1 Job` with the correct ownerReference
-- [ ] `RemediationJobReconciler` enforces `MAX_CONCURRENT_JOBS`
-- [ ] `RemediationJobReconciler` syncs Job status back to `RemediationJob.Status.Phase`
-- [ ] Results with zero errors are filtered out before entering the reconcile queue
-- [ ] All unit tests for `fingerprintFor` pass (see test table in CONTROLLER_LLD.md §11)
-- [ ] All integration tests using envtest pass
+- [x] `SourceProviderReconciler` creates a `RemediationJob` (with `sourceType="k8sgpt"`) for each new unique fingerprint
+- [x] `SourceProviderReconciler` skips Results whose fingerprint already has a non-Failed `RemediationJob`
+- [x] `SourceProviderReconciler` deletes Pending/Dispatched `RemediationJob` when its source Result is deleted
+- [x] `RemediationJobReconciler` creates a `batch/v1 Job` with the correct ownerReference
+- [x] `RemediationJobReconciler` enforces `MAX_CONCURRENT_JOBS`
+- [x] `RemediationJobReconciler` syncs Job status back to `RemediationJob.Status.Phase`
+- [x] Results with zero errors are filtered out before entering the reconcile queue
+- [x] All unit tests for `fingerprintFor` pass (see test table in CONTROLLER_LLD.md §11)
+- [x] All integration tests using envtest pass
 
 ## Stories
 
 | Story | File | Status |
 |-------|------|--------|
-| Result CRD scheme registration | [STORY_01_scheme.md](STORY_01_scheme.md) | Not Started |
-| fingerprintFor implementation + tests | [STORY_02_fingerprint.md](STORY_02_fingerprint.md) | Not Started |
-| SourceProviderReconciler — RemediationJob creation | [STORY_03_dedup_map.md](STORY_03_dedup_map.md) | Not Started |
-| RemediationJobReconciler — Job dispatch | [STORY_04_reconcile.md](STORY_04_reconcile.md) | Not Started |
-| Error-filter predicate | [STORY_05_predicate.md](STORY_05_predicate.md) | Not Started |
-| Manager wiring (main.go) | [STORY_06_manager.md](STORY_06_manager.md) | Not Started |
-| Integration tests (envtest) | [STORY_07_integration_tests.md](STORY_07_integration_tests.md) | Not Started |
+| Result CRD scheme registration | [STORY_01_scheme.md](STORY_01_scheme.md) | Complete |
+| fingerprintFor implementation + tests | [STORY_02_fingerprint.md](STORY_02_fingerprint.md) | Complete |
+| SourceProviderReconciler — RemediationJob creation | [STORY_03_dedup_map.md](STORY_03_dedup_map.md) | Complete |
+| RemediationJobReconciler — Job dispatch | [STORY_04_reconcile.md](STORY_04_reconcile.md) | Complete |
+| Error-filter predicate | [STORY_05_predicate.md](STORY_05_predicate.md) | Complete |
+| Manager wiring (main.go) | [STORY_06_manager.md](STORY_06_manager.md) | Complete |
+| Integration tests (envtest) | [STORY_07_integration_tests.md](STORY_07_integration_tests.md) | Complete |
 
 ## Technical Overview
 
@@ -64,7 +64,7 @@ tests before implementing the reconciler body.
 
 ## Definition of Done
 
-- [ ] All unit tests pass with race detector
-- [ ] All envtest integration tests pass
-- [ ] `go vet` is clean
-- [ ] CONTROLLER_LLD.md test table fully covered
+- [x] All unit tests pass with race detector
+- [x] All envtest integration tests pass
+- [x] `go vet` is clean
+- [x] CONTROLLER_LLD.md test table fully covered

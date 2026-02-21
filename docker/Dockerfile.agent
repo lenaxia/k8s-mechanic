@@ -49,11 +49,11 @@ RUN curl -fsSL "https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/linux/${TARGET
     && rm /tmp/kubectl.sha256 \
     && chmod +x /usr/local/bin/kubectl
 
-# k8sgpt — with SHA256 verification (CHECKSUMS from GitHub releases)
+# k8sgpt — with SHA256 verification (CHECKSUMS from GitHub releases) (add retries)
 RUN ARCH=$([ "$TARGETARCH" = "amd64" ] && echo "x86_64" || echo "arm64") \
-    && curl -fsSL "https://github.com/k8sgpt-ai/k8sgpt/releases/download/v${K8SGPT_VERSION}/k8sgpt_Linux_${ARCH}.tar.gz" \
+    && curl -fsSL --retry 3 --retry-delay 5 "https://github.com/k8sgpt-ai/k8sgpt/releases/download/v${K8SGPT_VERSION}/k8sgpt_Linux_${ARCH}.tar.gz" \
       -o /tmp/k8sgpt.tar.gz \
-    && curl -fsSL "https://github.com/k8sgpt-ai/k8sgpt/releases/download/v${K8SGPT_VERSION}/checksums.txt" \
+    && curl -fsSL --retry 3 --retry-delay 5 "https://github.com/k8sgpt-ai/k8sgpt/releases/download/v${K8SGPT_VERSION}/checksums.txt" \
       | grep "k8sgpt_Linux_${ARCH}.tar.gz$" \
       | awk '{print $1 "  /tmp/k8sgpt.tar.gz"}' | sha256sum --check \
     && tar -xz -C /usr/local/bin -f /tmp/k8sgpt.tar.gz k8sgpt \
@@ -67,77 +67,78 @@ RUN curl -fsSL "https://get.helm.sh/helm-v${HELM_VERSION}-linux-${TARGETARCH}.ta
     && tar -xz -C /usr/local/bin --strip-components=1 -f /tmp/helm.tar.gz "linux-${TARGETARCH}/helm" \
     && rm /tmp/helm.tar.gz
 
-# flux — with CHECKSUMS
-RUN curl -fsSL "https://github.com/fluxcd/flux2/releases/download/v${FLUX_VERSION}/flux_${FLUX_VERSION}_linux_${TARGETARCH}.tar.gz" \
+# flux — with CHECKSUMS (add retries)
+RUN curl -fsSL --retry 3 --retry-delay 5 "https://github.com/fluxcd/flux2/releases/download/v${FLUX_VERSION}/flux_${FLUX_VERSION}_linux_${TARGETARCH}.tar.gz" \
       -o /tmp/flux.tar.gz \
-    && curl -fsSL "https://github.com/fluxcd/flux2/releases/download/v${FLUX_VERSION}/flux_${FLUX_VERSION}_checksums.txt" \
+    && curl -fsSL --retry 3 --retry-delay 5 "https://github.com/fluxcd/flux2/releases/download/v${FLUX_VERSION}/flux_${FLUX_VERSION}_checksums.txt" \
       | grep "flux_${FLUX_VERSION}_linux_${TARGETARCH}.tar.gz$" \
       | awk '{print $1 "  /tmp/flux.tar.gz"}' | sha256sum --check \
     && tar -xz -C /usr/local/bin -f /tmp/flux.tar.gz flux \
     && rm /tmp/flux.tar.gz
 
-# talosctl — with SHA256 sidecar file
-RUN curl -fsSL "https://github.com/siderolabs/talos/releases/download/v${TALOSCTL_VERSION}/talosctl-linux-${TARGETARCH}" \
+# talosctl — with SHA256 sidecar file (add retries)
+RUN curl -fsSL --retry 3 --retry-delay 5 "https://github.com/siderolabs/talos/releases/download/v${TALOSCTL_VERSION}/talosctl-linux-${TARGETARCH}" \
       -o /tmp/talosctl \
-    && curl -fsSL "https://github.com/siderolabs/talos/releases/download/v${TALOSCTL_VERSION}/sha256sum.txt" \
+    && curl -fsSL --retry 3 --retry-delay 5 "https://github.com/siderolabs/talos/releases/download/v${TALOSCTL_VERSION}/sha256sum.txt" \
       | grep "talosctl-linux-${TARGETARCH}$" \
       | awk '{print $1 "  /tmp/talosctl"}' | sha256sum --check \
     && mv /tmp/talosctl /usr/local/bin/talosctl \
     && chmod +x /usr/local/bin/talosctl
 
-# kustomize — with checksums from GitHub releases
-RUN curl -fsSL "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize/v${KUSTOMIZE_VERSION}/kustomize_v${KUSTOMIZE_VERSION}_linux_${TARGETARCH}.tar.gz" \
+# kustomize — with checksums from GitHub releases (add retries for transient GitHub errors)
+RUN curl -fsSL --retry 3 --retry-delay 5 "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize/v${KUSTOMIZE_VERSION}/kustomize_v${KUSTOMIZE_VERSION}_linux_${TARGETARCH}.tar.gz" \
       -o /tmp/kustomize.tar.gz \
-    && curl -fsSL "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize/v${KUSTOMIZE_VERSION}/checksums.txt" \
+    && curl -fsSL --retry 3 --retry-delay 5 "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize/v${KUSTOMIZE_VERSION}/checksums.txt" \
       | grep "kustomize_v${KUSTOMIZE_VERSION}_linux_${TARGETARCH}.tar.gz$" \
       | awk '{print $1 "  /tmp/kustomize.tar.gz"}' | sha256sum --check \
     && tar -xz -C /usr/local/bin -f /tmp/kustomize.tar.gz kustomize \
     && rm /tmp/kustomize.tar.gz
 
-# yq — with SHA256 sidecar
-RUN curl -fsSL "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_${TARGETARCH}" \
+# yq — with SHA256 sidecar (add retries)
+RUN curl -fsSL --retry 3 --retry-delay 5 "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_${TARGETARCH}" \
       -o /usr/local/bin/yq \
-    && curl -fsSL "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/checksums" \
-      | grep "yq_linux_${TARGETARCH} " | awk '{print $19 "  /usr/local/bin/yq"}' | sha256sum --check \
+    && curl -fsSL --retry 3 --retry-delay 5 "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/checksums" \
+      | grep "yq_linux_${TARGETARCH} " \
+      | awk '{print $1 "  /usr/local/bin/yq"}' | sha256sum --check \
     && chmod +x /usr/local/bin/yq
 
-# kubeconform — with checksums
-RUN curl -fsSL "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-${TARGETARCH}.tar.gz" \
+# kubeconform — with checksums (add retries)
+RUN curl -fsSL --retry 3 --retry-delay 5 "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-${TARGETARCH}.tar.gz" \
       -o /tmp/kubeconform.tar.gz \
-    && curl -fsSL "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/CHECKSUMS" \
+    && curl -fsSL --retry 3 --retry-delay 5 "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/CHECKSUMS" \
       | grep "kubeconform-linux-${TARGETARCH}.tar.gz$" \
       | awk '{print $1 "  /tmp/kubeconform.tar.gz"}' | sha256sum --check \
     && tar -xz -C /usr/local/bin -f /tmp/kubeconform.tar.gz kubeconform \
     && rm /tmp/kubeconform.tar.gz
 
-# stern — with checksums
-RUN curl -fsSL "https://github.com/stern/stern/releases/download/v${STERN_VERSION}/stern_${STERN_VERSION}_linux_${TARGETARCH}.tar.gz" \
+# stern — with checksums (add retries)
+RUN curl -fsSL --retry 3 --retry-delay 5 "https://github.com/stern/stern/releases/download/v${STERN_VERSION}/stern_${STERN_VERSION}_linux_${TARGETARCH}.tar.gz" \
       -o /tmp/stern.tar.gz \
-    && curl -fsSL "https://github.com/stern/stern/releases/download/v${STERN_VERSION}/checksums.txt" \
+    && curl -fsSL --retry 3 --retry-delay 5 "https://github.com/stern/stern/releases/download/v${STERN_VERSION}/checksums.txt" \
       | grep "stern_${STERN_VERSION}_linux_${TARGETARCH}.tar.gz$" \
       | awk '{print $1 "  /tmp/stern.tar.gz"}' | sha256sum --check \
     && tar -xz -C /usr/local/bin -f /tmp/stern.tar.gz stern \
     && rm /tmp/stern.tar.gz
 
 # age — age releases don't provide CHECKSUMS file, only provenance .proof files
-# Skip checksum verification for age to match upstream release process
-RUN curl -fsSL "https://github.com/FiloSottile/age/releases/download/v${AGE_VERSION}/age-v${AGE_VERSION}-linux-${TARGETARCH}.tar.gz" \
+# Skip checksum verification for age to match upstream release process (add retries)
+RUN curl -fsSL --retry 3 --retry-delay 5 "https://github.com/FiloSottile/age/releases/download/v${AGE_VERSION}/age-v${AGE_VERSION}-linux-${TARGETARCH}.tar.gz" \
       -o /tmp/age.tar.gz \
     && tar -xz -C /usr/local/bin --strip-components=1 -f /tmp/age.tar.gz "age/age" "age/age-keygen" \
     && rm /tmp/age.tar.gz
 
-# sops — sops releases use .checksums.txt (lowercase, with dot)
-RUN curl -fsSL "https://github.com/getsops/sops/releases/download/v${SOPS_VERSION}/sops-v${SOPS_VERSION}.linux.${TARGETARCH}" \
+# sops — sops releases use .checksums.txt (lowercase, with dot) (add retries)
+RUN curl -fsSL --retry 3 --retry-delay 5 "https://github.com/getsops/sops/releases/download/v${SOPS_VERSION}/sops-v${SOPS_VERSION}.linux.${TARGETARCH}" \
       -o /usr/local/bin/sops \
-    && curl -fsSL "https://github.com/getsops/sops/releases/download/v${SOPS_VERSION}/sops-v${SOPS_VERSION}.checksums.txt" \
+    && curl -fsSL --retry 3 --retry-delay 5 "https://github.com/getsops/sops/releases/download/v${SOPS_VERSION}/sops-v${SOPS_VERSION}.checksums.txt" \
       | grep "sops-v${SOPS_VERSION}.linux.${TARGETARCH}$" \
       | awk '{print $1 "  /usr/local/bin/sops"}' | sha256sum --check \
     && chmod +x /usr/local/bin/sops
 
 # opencode — pinned release binary
-# v1.2.10 uses musl builds: opencode-linux-x64-musl.tar.gz and opencode-linux-arm64-musl.tar.gz
+# v1.2.10 uses musl builds: opencode-linux-x64-musl.tar.gz and opencode-linux-arm64-musl.tar.gz (add retries)
 RUN ARCH=$([ "$TARGETARCH" = "amd64" ] && echo "x64-musl" || echo "arm64-musl") \
-    && curl -fsSL "https://github.com/sst/opencode/releases/download/v${OPENCODE_VERSION}/opencode-linux-${ARCH}.tar.gz" \
+    && curl -fsSL --retry 3 --retry-delay 5 "https://github.com/sst/opencode/releases/download/v${OPENCODE_VERSION}/opencode-linux-${ARCH}.tar.gz" \
       -o /tmp/opencode.tar.gz \
     && tar -xz -C /usr/local/bin -f /tmp/opencode.tar.gz opencode \
     && rm /tmp/opencode.tar.gz

@@ -291,6 +291,28 @@ func TestRemediationJobReconciler_Failed_ReturnsNil(t *testing.T) {
 	}
 }
 
+// TestRemediationJobReconciler_Cancelled_ReturnsNil verifies Cancelled phase → nil returned immediately.
+func TestRemediationJobReconciler_Cancelled_ReturnsNil(t *testing.T) {
+	const fp = "abcdefghijklmnopqrstuvwxyz012345abcdefghijklmnopqrstuvwxyz012345"
+	rjob := newRJob("test-rjob", fp)
+	rjob.Status.Phase = v1alpha1.PhaseCancelled
+
+	c := newFakeClient(t, rjob)
+	jb := &fakeJobBuilder{}
+	r := newReconciler(t, c, jb, defaultCfg())
+
+	result, err := r.Reconcile(context.Background(), rjobReqFor("test-rjob"))
+	if err != nil {
+		t.Errorf("expected nil error for Cancelled phase, got %v", err)
+	}
+	if result.RequeueAfter != 0 || result.Requeue {
+		t.Errorf("expected zero Result for Cancelled phase, got %+v", result)
+	}
+	if len(jb.calls) != 0 {
+		t.Error("expected no Build() calls for Cancelled phase")
+	}
+}
+
 // TestRemediationJobReconciler_OwnerRef verifies created job has ownerReference pointing to RJob.
 func TestRemediationJobReconciler_OwnerRef(t *testing.T) {
 	const fp = "abcdefghijklmnopqrstuvwxyz012345abcdefghijklmnopqrstuvwxyz012345"

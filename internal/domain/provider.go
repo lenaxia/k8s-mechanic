@@ -25,7 +25,8 @@ type SourceProvider interface {
 
 	// Fingerprint computes the deduplication key for the given Finding.
 	// Must be deterministic: same logical finding always produces the same fingerprint.
-	Fingerprint(f *Finding) string
+	// Returns an error if the finding's error payload cannot be serialised.
+	Fingerprint(f *Finding) (string, error)
 }
 
 // Finding is the provider-agnostic representation of a cluster problem.

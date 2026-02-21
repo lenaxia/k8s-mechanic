@@ -2,6 +2,7 @@ package provider_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -24,6 +25,7 @@ type fakeSourceProvider struct {
 	finding    *domain.Finding
 	findErr    error
 	fp         string
+	fpErr      error
 }
 
 func (f *fakeSourceProvider) ProviderName() string      { return f.name }
@@ -31,7 +33,7 @@ func (f *fakeSourceProvider) ObjectType() client.Object { return f.objectType }
 func (f *fakeSourceProvider) ExtractFinding(_ client.Object) (*domain.Finding, error) {
 	return f.finding, f.findErr
 }
-func (f *fakeSourceProvider) Fingerprint(_ *domain.Finding) string { return f.fp }
+func (f *fakeSourceProvider) Fingerprint(_ *domain.Finding) (string, error) { return f.fp, f.fpErr }
 
 var _ domain.SourceProvider = (*fakeSourceProvider)(nil)
 
@@ -122,7 +124,9 @@ func (t *trackingFakeProvider) ExtractFinding(obj client.Object) (*domain.Findin
 	t.extractCalled = true
 	return t.inner.ExtractFinding(obj)
 }
-func (t *trackingFakeProvider) Fingerprint(f *domain.Finding) string { return t.inner.fp }
+func (t *trackingFakeProvider) Fingerprint(f *domain.Finding) (string, error) {
+	return t.inner.fp, nil
+}
 
 // TestSourceProviderReconciler_SkipsOnNilFinding verifies no RemediationJob is created when
 // ExtractFinding returns nil, nil.
@@ -394,5 +398,65 @@ func TestSourceProviderReconciler_NotFound_DeletesDispatchedRJobs(t *testing.T) 
 	}
 	if len(list.Items) != 0 {
 		t.Errorf("expected 0 RemediationJobs after source deleted, got %d", len(list.Items))
+	}
+}
+
+// TestSourceProviderReconciler_NotFound_DeletesRunningRJobs verifies Running jobs are
+// also cancelled when the source Result is deleted.
+func TestSourceProviderReconciler_NotFound_DeletesRunningRJobs(t *testing.T) {
+	p := &fakeSourceProvider{
+		name:       "k8sgpt",
+		objectType: &v1alpha1.Result{},
+	}
+
+	runningRJob := &v1alpha1.RemediationJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "mendabot-running",
+			Namespace: agentNamespace,
+		},
+		Spec: v1alpha1.RemediationJobSpec{
+			SourceResultRef: v1alpha1.ResultRef{Name: "r1", Namespace: "default"},
+		},
+		Status: v1alpha1.RemediationJobStatus{Phase: v1alpha1.PhaseRunning},
+	}
+
+	c := newTestClient(runningRJob)
+	r := newTestReconciler(p, c)
+
+	_, err := r.Reconcile(context.Background(), reqFor("r1", "default"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var list v1alpha1.RemediationJobList
+	if err := c.List(context.Background(), &list, client.InNamespace(agentNamespace)); err != nil {
+		t.Fatalf("list error: %v", err)
+	}
+	if len(list.Items) != 0 {
+		t.Errorf("expected 0 RemediationJobs after source deleted, got %d", len(list.Items))
+	}
+}
+
+// TestSourceProviderReconciler_FingerprintError_ReturnsError verifies that a Fingerprint
+// error is propagated as a reconciler error.
+func TestSourceProviderReconciler_FingerprintError_ReturnsError(t *testing.T) {
+	fpErr := fmt.Errorf("hash write failed")
+	p := &fakeSourceProvider{
+		name:       "k8sgpt",
+		objectType: &v1alpha1.Result{},
+		finding: &domain.Finding{
+			Kind: "Pod", Namespace: "default", ParentObject: "my-deploy",
+			Errors: `[{"text":"error"}]`,
+		},
+		fpErr: fpErr,
+	}
+
+	obj := makeWatchedObject("r1", "default")
+	c := newTestClient(obj)
+	r := newTestReconciler(p, c)
+
+	_, err := r.Reconcile(context.Background(), reqFor("r1", "default"))
+	if err == nil {
+		t.Error("expected error from Fingerprint failure, got nil")
 	}
 }

@@ -65,6 +65,10 @@ const (
 
 	// PhaseFailed means the batch/v1 Job failed (all retries exhausted or deadline exceeded).
 	PhaseFailed RemediationJobPhase = "Failed"
+
+	// PhaseCancelled means the RemediationJob was deleted before it could complete
+	// because its source Result was deleted while the job was Pending or Running.
+	PhaseCancelled RemediationJobPhase = "Cancelled"
 )
 
 // Standard condition type constants.
@@ -150,7 +154,7 @@ type FindingSpec struct {
 // RemediationJobStatus defines the observed state of a RemediationJob.
 type RemediationJobStatus struct {
 	// Phase is the current lifecycle phase of this RemediationJob.
-	// +kubebuilder:validation:Enum=Pending;Dispatched;Running;Succeeded;Failed
+	// +kubebuilder:validation:Enum=Pending;Dispatched;Running;Succeeded;Failed;Cancelled
 	Phase RemediationJobPhase `json:"phase,omitempty"`
 
 	// JobRef is the name of the batch/v1 Job created for this remediation.
@@ -203,6 +207,7 @@ func (in *RemediationJob) DeepCopyInto(out *RemediationJob) {
 	*out = *in
 	out.TypeMeta = in.TypeMeta
 	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
+	// Spec contains only value types (strings); a shallow copy is sufficient.
 	out.Spec = in.Spec
 	out.Status.Phase = in.Status.Phase
 	out.Status.JobRef = in.Status.JobRef

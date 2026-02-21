@@ -64,9 +64,9 @@ func (p *K8sGPTProvider) ExtractFinding(obj client.Object) (*domain.Finding, err
 
 // Fingerprint computes the deduplication key for the given Finding.
 // Re-parses error texts from the pre-serialised JSON in f.Errors, sorts them,
-// then hashes namespace + kind + parentObject + sorted texts using SetEscapeHTML(false)
-// to match fingerprintFor's output for the same logical finding.
-func (p *K8sGPTProvider) Fingerprint(f *domain.Finding) string {
+// then hashes namespace + kind + parentObject + sorted texts using SetEscapeHTML(false).
+// Returns an error if the payload cannot be JSON-encoded (extremely unlikely in practice).
+func (p *K8sGPTProvider) Fingerprint(f *domain.Finding) (string, error) {
 	var failures []struct {
 		Text string `json:"text"`
 	}
@@ -94,7 +94,7 @@ func (p *K8sGPTProvider) Fingerprint(f *domain.Finding) string {
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
 	if err := enc.Encode(payload); err != nil {
-		panic(fmt.Sprintf("K8sGPTProvider.Fingerprint: json.Encode failed: %v", err))
+		return "", fmt.Errorf("K8sGPTProvider.Fingerprint: json.Encode failed: %w", err)
 	}
-	return fmt.Sprintf("%x", sha256.Sum256(buf.Bytes()))
+	return fmt.Sprintf("%x", sha256.Sum256(buf.Bytes())), nil
 }

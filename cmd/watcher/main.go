@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -65,10 +66,11 @@ func main() {
 	}
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
-		Scheme:                 scheme,
-		LeaderElection:         false,
-		Metrics:                metricsserver.Options{BindAddress: ":8080"},
-		HealthProbeBindAddress: ":8081",
+		Scheme:                  scheme,
+		LeaderElection:          false,
+		Metrics:                 metricsserver.Options{BindAddress: ":8080"},
+		HealthProbeBindAddress:  ":8081",
+		GracefulShutdownTimeout: func() *time.Duration { d := 30 * time.Second; return &d }(),
 	})
 	if err != nil {
 		log.Fatalf("unable to start manager: %v", err)

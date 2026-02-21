@@ -6,7 +6,7 @@ Build the `mendabot-agent` Docker image — a self-contained investigation envir
 containing every CLI tool the OpenCode agent needs to inspect a cluster, read a GitOps
 repo, and open a pull request.
 
-## Status: Not Started
+## Status: Complete
 
 ## Dependencies
 

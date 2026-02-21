@@ -19,6 +19,11 @@ import (
 	"github.com/lenaxia/k8s-mendabot/internal/domain"
 )
 
+//+kubebuilder:rbac:groups=remediation.mendabot.io,resources=remediationjobs,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=remediation.mendabot.io,resources=remediationjobs/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=remediation.mendabot.io,resources=remediationjobs/finalizers,verbs=update
+//+kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
+
 // RemediationJobReconciler watches RemediationJob objects and drives the Job lifecycle.
 // It is provider-agnostic — it acts on all RemediationJob objects regardless of source.
 type RemediationJobReconciler struct {
@@ -26,7 +31,8 @@ type RemediationJobReconciler struct {
 	Scheme     *runtime.Scheme
 	Log        *zap.Logger
 	JobBuilder domain.JobBuilder
-	Cfg        config.Config
+	// Cfg holds operator-wide configuration. MaxConcurrentJobs == 0 means unlimited.
+	Cfg config.Config
 }
 
 // Reconcile implements ctrl.Reconciler.
@@ -56,6 +62,9 @@ func (r *RemediationJobReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, nil
 
 	case v1alpha1.PhaseFailed:
+		return ctrl.Result{}, nil
+
+	case v1alpha1.PhaseCancelled:
 		return ctrl.Result{}, nil
 	}
 
@@ -112,7 +121,7 @@ func (r *RemediationJobReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			activeCount++
 		}
 	}
-	if activeCount >= r.Cfg.MaxConcurrentJobs {
+	if r.Cfg.MaxConcurrentJobs > 0 && activeCount >= r.Cfg.MaxConcurrentJobs {
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 

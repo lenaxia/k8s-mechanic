@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"go.uber.org/zap"
@@ -39,6 +40,7 @@ func (r *SourceProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		if listErr := r.List(ctx, &rjobList, client.InNamespace(r.Cfg.AgentNamespace)); listErr != nil {
 			return ctrl.Result{}, listErr
 		}
+		var cancelErrs []error
 		for i := range rjobList.Items {
 			rjob := &rjobList.Items[i]
 			if rjob.Spec.SourceResultRef.Name != req.Name ||
@@ -46,12 +48,25 @@ func (r *SourceProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 				continue
 			}
 			phase := rjob.Status.Phase
-			if phase != v1alpha1.PhasePending && phase != v1alpha1.PhaseDispatched && phase != "" {
+			// Cancel Pending, Dispatched, Running, and unset-phase (freshly created) jobs.
+			// Succeeded, Failed, and Cancelled jobs are left intact.
+			if phase != v1alpha1.PhasePending && phase != v1alpha1.PhaseDispatched &&
+				phase != v1alpha1.PhaseRunning && phase != "" {
+				continue
+			}
+			// Patch phase to Cancelled before deleting so observers see the terminal state.
+			rjobCopy := rjob.DeepCopyObject().(*v1alpha1.RemediationJob)
+			rjob.Status.Phase = v1alpha1.PhaseCancelled
+			if patchErr := r.Status().Patch(ctx, rjob, client.MergeFrom(rjobCopy)); patchErr != nil && !apierrors.IsNotFound(patchErr) {
+				cancelErrs = append(cancelErrs, patchErr)
 				continue
 			}
 			if delErr := r.Delete(ctx, rjob); delErr != nil && !apierrors.IsNotFound(delErr) {
-				return ctrl.Result{}, delErr
+				cancelErrs = append(cancelErrs, delErr)
 			}
+		}
+		if len(cancelErrs) > 0 {
+			return ctrl.Result{}, fmt.Errorf("cancelling RemediationJobs: %w", errors.Join(cancelErrs...))
 		}
 		return ctrl.Result{}, nil
 	}
@@ -64,7 +79,13 @@ func (r *SourceProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, nil
 	}
 
-	fp := r.Provider.Fingerprint(finding)
+	fp, err := r.Provider.Fingerprint(finding)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("computing fingerprint: %w", err)
+	}
+	if len(fp) < 12 {
+		return ctrl.Result{}, fmt.Errorf("fingerprint too short: got %d chars, need at least 12", len(fp))
+	}
 
 	var rjobList v1alpha1.RemediationJobList
 	if err := r.List(ctx, &rjobList,
@@ -102,7 +123,7 @@ func (r *SourceProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		},
 		Spec: v1alpha1.RemediationJobSpec{
 			SourceType: r.Provider.ProviderName(),
-			SinkType:   "github",
+			SinkType:   r.Cfg.SinkType,
 			SourceResultRef: v1alpha1.ResultRef{
 				Name:      req.Name,
 				Namespace: req.Namespace,

@@ -174,8 +174,14 @@ func TestK8sGPTProvider_Fingerprint_Deterministic(t *testing.T) {
 		ParentObject: "my-deploy",
 		Errors:       `[{"text":"CrashLoopBackOff"}]`,
 	}
-	fp1 := p.Fingerprint(finding)
-	fp2 := p.Fingerprint(finding)
+	fp1, err := p.Fingerprint(finding)
+	if err != nil {
+		t.Fatalf("Fingerprint returned unexpected error: %v", err)
+	}
+	fp2, err := p.Fingerprint(finding)
+	if err != nil {
+		t.Fatalf("Fingerprint returned unexpected error: %v", err)
+	}
 	if fp1 != fp2 {
 		t.Errorf("Fingerprint must be deterministic; got %q and %q", fp1, fp2)
 	}
@@ -194,7 +200,15 @@ func TestK8sGPTProvider_Fingerprint_OrderIndependent(t *testing.T) {
 		Kind: "Pod", Namespace: "default", ParentObject: "dp",
 		Errors: `[{"text":"beta"},{"text":"alpha"}]`,
 	}
-	if p.Fingerprint(f1) != p.Fingerprint(f2) {
+	fp1, err := p.Fingerprint(f1)
+	if err != nil {
+		t.Fatalf("Fingerprint f1 error: %v", err)
+	}
+	fp2, err := p.Fingerprint(f2)
+	if err != nil {
+		t.Fatalf("Fingerprint f2 error: %v", err)
+	}
+	if fp1 != fp2 {
 		t.Error("Fingerprint must be order-independent")
 	}
 }

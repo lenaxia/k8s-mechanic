@@ -132,9 +132,8 @@ RUN curl -fsSL --retry 3 --retry-delay 5 "https://github.com/getsops/sops/releas
       | awk '{print $1 "  /usr/local/bin/sops"}' | sha256sum --check \
     && chmod +x /usr/local/bin/sops
 
-# opencode — pinned release binary
-# v1.2.10 uses musl builds: opencode-linux-x64-musl.tar.gz and opencode-linux-arm64-musl.tar.gz (add retries)
-RUN ARCH=$([ "$TARGETARCH" = "amd64" ] && echo "x64-musl" || echo "arm64-musl") \
+# opencode — pinned release binary; use glibc builds to match debian:bookworm-slim base image
+RUN ARCH=$([ "$TARGETARCH" = "amd64" ] && echo "x64" || echo "arm64") \
     && curl -fsSL --retry 3 --retry-delay 5 "https://github.com/sst/opencode/releases/download/v${OPENCODE_VERSION}/opencode-linux-${ARCH}.tar.gz" \
       -o /tmp/opencode.tar.gz \
     && tar -xz -C /usr/local/bin -f /tmp/opencode.tar.gz opencode \

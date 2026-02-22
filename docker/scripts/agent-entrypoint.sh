@@ -40,6 +40,32 @@ OPENCODE_CONFIG_CONTENT=$(printf '{
   "model": "custom/%s"
 }' "$OPENAI_BASE_URL" "$OPENAI_API_KEY" "$OPENAI_MODEL" "$OPENAI_MODEL")
 
+# Build a kubeconfig using the SA token's own issuer as the server address.
+# On some Talos nodes the token audience is the node IP rather than the
+# kubernetes service VIP (10.96.0.1), causing kubectl to get 401 Unauthorized.
+# Reading the issuer from the token itself guarantees we hit the right endpoint.
+SA_TOKEN=/var/run/secrets/kubernetes.io/serviceaccount/token
+SA_CA=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+KUBE_ISSUER=$(cat "$SA_TOKEN" | cut -d. -f2 | base64 -d 2>/dev/null | jq -r '.iss // empty')
+if [ -n "$KUBE_ISSUER" ]; then
+    mkdir -p /home/agent/.kube
+    kubectl config set-cluster in-cluster \
+        --server="$KUBE_ISSUER" \
+        --certificate-authority="$SA_CA" \
+        --embed-certs=true \
+        --kubeconfig=/home/agent/.kube/config
+    kubectl config set-credentials in-cluster \
+        --token="$(cat $SA_TOKEN)" \
+        --kubeconfig=/home/agent/.kube/config
+    kubectl config set-context in-cluster \
+        --cluster=in-cluster \
+        --user=in-cluster \
+        --kubeconfig=/home/agent/.kube/config
+    kubectl config use-context in-cluster \
+        --kubeconfig=/home/agent/.kube/config
+    export KUBECONFIG=/home/agent/.kube/config
+fi
+
 # Authenticate gh CLI using the token written by the init container.
 # Validate that authentication succeeds — a bad token would otherwise only be
 # discovered mid-investigation when gh pr list fails.

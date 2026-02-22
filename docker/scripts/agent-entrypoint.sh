@@ -11,8 +11,34 @@ set -euo pipefail
 : "${FINDING_DETAILS:?FINDING_DETAILS must be set}"
 : "${GITOPS_REPO:?GITOPS_REPO must be set}"
 : "${GITOPS_MANIFEST_ROOT:?GITOPS_MANIFEST_ROOT must be set}"
+: "${OPENAI_API_KEY:?OPENAI_API_KEY must be set}"
+: "${OPENAI_BASE_URL:?OPENAI_BASE_URL must be set}"
+: "${OPENAI_MODEL:?OPENAI_MODEL must be set}"
 # FINDING_PARENT is optional - not all k8sgpt findings have a parent object
 FINDING_PARENT="${FINDING_PARENT:-<none>}"
+
+# Build the opencode config from injected LLM credentials and export it so
+# opencode picks it up without needing a config file on disk.
+# Uses a custom OpenAI-compatible provider pointing at the configured base URL.
+export OPENCODE_CONFIG_CONTENT
+OPENCODE_CONFIG_CONTENT=$(printf '{
+  "$schema": "https://opencode.ai/config.json",
+  "autoupdate": false,
+  "provider": {
+    "custom": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Custom",
+      "options": {
+        "baseURL": "%s",
+        "apiKey": "%s"
+      },
+      "models": {
+        "%s": {}
+      }
+    }
+  },
+  "model": "custom/%s"
+}' "$OPENAI_BASE_URL" "$OPENAI_API_KEY" "$OPENAI_MODEL" "$OPENAI_MODEL")
 
 # Authenticate gh CLI using the token written by the init container.
 # Validate that authentication succeeds — a bad token would otherwise only be

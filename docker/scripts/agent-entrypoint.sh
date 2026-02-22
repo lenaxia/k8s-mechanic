@@ -25,10 +25,7 @@ OPENCODE_CONFIG_CONTENT=$(printf '{
   "$schema": "https://opencode.ai/config.json",
   "autoupdate": false,
   "permission": {
-    "bash": "allow",
-    "read": "allow",
-    "write": "allow",
-    "edit": "allow"
+    "*": "allow"
   },
   "provider": {
     "custom": {

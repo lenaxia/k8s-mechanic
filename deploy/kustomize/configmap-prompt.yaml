@@ -2,7 +2,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: opencode-prompt
-  namespace: mendabot
+  namespace: default
 data:
   prompt.txt: |
     You are an SRE agent running inside a Kubernetes cluster. The k8sgpt-operator has

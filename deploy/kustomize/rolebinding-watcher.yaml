@@ -2,11 +2,11 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: mendabot-watcher
-  namespace: mendabot
+  namespace: default
 subjects:
 - kind: ServiceAccount
   name: mendabot-watcher
-  namespace: mendabot
+  namespace: default
 roleRef:
   kind: Role
   name: mendabot-watcher

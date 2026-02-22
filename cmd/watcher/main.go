@@ -14,6 +14,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	"go.uber.org/zap"
+	zapr "sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	"github.com/lenaxia/k8s-mendabot/api/v1alpha1"
 	"github.com/lenaxia/k8s-mendabot/internal/config"
@@ -50,6 +51,8 @@ func main() {
 		log.Fatalf("logger init failed: %v", err)
 	}
 	defer logger.Sync() //nolint:errcheck
+
+	ctrl.SetLogger(zapr.New())
 
 	scheme := runtime.NewScheme()
 	if err := clientgoscheme.AddToScheme(scheme); err != nil {

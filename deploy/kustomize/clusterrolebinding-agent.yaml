@@ -5,7 +5,7 @@ metadata:
 subjects:
 - kind: ServiceAccount
   name: mendabot-agent
-  namespace: mendabot
+  namespace: default
 roleRef:
   kind: ClusterRole
   name: mendabot-agent

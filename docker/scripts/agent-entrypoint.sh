@@ -6,12 +6,13 @@ set -euo pipefail
 : "${FINDING_KIND:?FINDING_KIND must be set}"
 : "${FINDING_NAME:?FINDING_NAME must be set}"
 : "${FINDING_NAMESPACE:?FINDING_NAMESPACE must be set}"
-: "${FINDING_PARENT:?FINDING_PARENT must be set}"
 : "${FINDING_FINGERPRINT:?FINDING_FINGERPRINT must be set}"
 : "${FINDING_ERRORS:?FINDING_ERRORS must be set}"
 : "${FINDING_DETAILS:?FINDING_DETAILS must be set}"
 : "${GITOPS_REPO:?GITOPS_REPO must be set}"
 : "${GITOPS_MANIFEST_ROOT:?GITOPS_MANIFEST_ROOT must be set}"
+# FINDING_PARENT is optional - not all k8sgpt findings have a parent object
+FINDING_PARENT="${FINDING_PARENT:-<none>}"
 
 # Authenticate gh CLI using the token written by the init container.
 # Validate that authentication succeeds — a bad token would otherwise only be

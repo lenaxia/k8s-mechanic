@@ -5,9 +5,11 @@ import (
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -38,6 +40,8 @@ const agentNamespace = "mendabot"
 
 func newTestScheme() *runtime.Scheme {
 	s := v1alpha1.NewScheme()
+	// Add client-go scheme so that core types (ConfigMap used as watched object) are registered.
+	_ = clientgoscheme.AddToScheme(s)
 	return s
 }
 
@@ -59,16 +63,13 @@ func newTestReconciler(p *fakeSourceProvider, c client.Client) *provider.SourceP
 	}
 }
 
-func makeWatchedObject(name, namespace string) *v1alpha1.Result {
-	return &v1alpha1.Result{
+// makeWatchedObject creates a ConfigMap as a generic watched object for unit tests.
+// The reconciler logic does not depend on the type — only ExtractFinding does.
+func makeWatchedObject(name, namespace string) *corev1.ConfigMap {
+	return &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: namespace,
-		},
-		Spec: v1alpha1.ResultSpec{
-			Kind:         "Pod",
-			ParentObject: "my-deploy",
-			Error:        []v1alpha1.Failure{{Text: "CrashLoopBackOff"}},
 		},
 	}
 }
@@ -82,7 +83,7 @@ func TestSourceProviderReconciler_CallsExtractFinding(t *testing.T) {
 	called := false
 	p := &fakeSourceProvider{
 		name:       "fake",
-		objectType: &v1alpha1.Result{},
+		objectType: &corev1.ConfigMap{},
 		findErr:    nil,
 	}
 	p.finding = nil // nil finding → skip, but still calls ExtractFinding
@@ -127,7 +128,7 @@ var _ domain.SourceProvider = (*trackingFakeProvider)(nil)
 func TestSourceProviderReconciler_SkipsOnNilFinding(t *testing.T) {
 	p := &fakeSourceProvider{
 		name:       "fake",
-		objectType: &v1alpha1.Result{},
+		objectType: &corev1.ConfigMap{},
 		finding:    nil,
 		findErr:    nil,
 	}
@@ -166,8 +167,8 @@ func TestSourceProviderReconciler_CreatesRemediationJob(t *testing.T) {
 	}
 
 	p := &fakeSourceProvider{
-		name:       "k8sgpt",
-		objectType: &v1alpha1.Result{},
+		name:       "native",
+		objectType: &corev1.ConfigMap{},
 		finding:    finding,
 	}
 
@@ -196,8 +197,8 @@ func TestSourceProviderReconciler_CreatesRemediationJob(t *testing.T) {
 	if rjob.Spec.Fingerprint != expectedFP {
 		t.Errorf("fingerprint = %q, want %q", rjob.Spec.Fingerprint, expectedFP)
 	}
-	if rjob.Spec.SourceType != "k8sgpt" {
-		t.Errorf("sourceType = %q, want %q", rjob.Spec.SourceType, "k8sgpt")
+	if rjob.Spec.SourceType != "native" {
+		t.Errorf("sourceType = %q, want %q", rjob.Spec.SourceType, "native")
 	}
 	if rjob.Spec.SourceResultRef.Name != "r1" {
 		t.Errorf("sourceResultRef.Name = %q, want %q", rjob.Spec.SourceResultRef.Name, "r1")
@@ -229,8 +230,8 @@ func TestSourceProviderReconciler_SkipsDuplicateFingerprint(t *testing.T) {
 	}
 
 	p := &fakeSourceProvider{
-		name:       "k8sgpt",
-		objectType: &v1alpha1.Result{},
+		name:       "native",
+		objectType: &corev1.ConfigMap{},
 		finding:    finding,
 	}
 
@@ -242,7 +243,7 @@ func TestSourceProviderReconciler_SkipsDuplicateFingerprint(t *testing.T) {
 		},
 		Spec: v1alpha1.RemediationJobSpec{
 			Fingerprint: fp,
-			SourceType:  "k8sgpt",
+			SourceType:  "native",
 		},
 	}
 
@@ -278,8 +279,8 @@ func TestSourceProviderReconciler_ReDispatchesFailedRemediationJob(t *testing.T)
 	}
 
 	p := &fakeSourceProvider{
-		name:       "k8sgpt",
-		objectType: &v1alpha1.Result{},
+		name:       "native",
+		objectType: &corev1.ConfigMap{},
 		finding:    finding,
 	}
 
@@ -293,7 +294,7 @@ func TestSourceProviderReconciler_ReDispatchesFailedRemediationJob(t *testing.T)
 		},
 		Spec: v1alpha1.RemediationJobSpec{
 			Fingerprint:        fp,
-			SourceType:         "k8sgpt",
+			SourceType:         "native",
 			SinkType:           "github",
 			GitOpsRepo:         "org/repo",
 			GitOpsManifestRoot: "deploy",
@@ -338,8 +339,8 @@ func TestSourceProviderReconciler_ReDispatchesFailedRemediationJob(t *testing.T)
 // object is not found, any Pending/Dispatched RemediationJobs for that source ref are deleted.
 func TestSourceProviderReconciler_NotFound_DeletesPendingRJobs(t *testing.T) {
 	p := &fakeSourceProvider{
-		name:       "k8sgpt",
-		objectType: &v1alpha1.Result{},
+		name:       "native",
+		objectType: &corev1.ConfigMap{},
 	}
 
 	pendingRJob := &v1alpha1.RemediationJob{
@@ -353,7 +354,7 @@ func TestSourceProviderReconciler_NotFound_DeletesPendingRJobs(t *testing.T) {
 		Status: v1alpha1.RemediationJobStatus{Phase: v1alpha1.PhasePending},
 	}
 
-	// No Result object — it's been deleted
+	// No watched object — it's been deleted
 	c := newTestClient(pendingRJob)
 	r := newTestReconciler(p, c)
 
@@ -372,11 +373,11 @@ func TestSourceProviderReconciler_NotFound_DeletesPendingRJobs(t *testing.T) {
 }
 
 // TestSourceProviderReconciler_NotFound_DeletesDispatchedRJobs verifies Dispatched jobs are
-// also cancelled when the source Result is deleted.
+// also cancelled when the source object is deleted.
 func TestSourceProviderReconciler_NotFound_DeletesDispatchedRJobs(t *testing.T) {
 	p := &fakeSourceProvider{
-		name:       "k8sgpt",
-		objectType: &v1alpha1.Result{},
+		name:       "native",
+		objectType: &corev1.ConfigMap{},
 	}
 
 	dispatchedRJob := &v1alpha1.RemediationJob{
@@ -408,11 +409,11 @@ func TestSourceProviderReconciler_NotFound_DeletesDispatchedRJobs(t *testing.T) 
 }
 
 // TestSourceProviderReconciler_NotFound_DeletesRunningRJobs verifies Running jobs are
-// also cancelled when the source Result is deleted.
+// also cancelled when the source object is deleted.
 func TestSourceProviderReconciler_NotFound_DeletesRunningRJobs(t *testing.T) {
 	p := &fakeSourceProvider{
-		name:       "k8sgpt",
-		objectType: &v1alpha1.Result{},
+		name:       "native",
+		objectType: &corev1.ConfigMap{},
 	}
 
 	runningRJob := &v1alpha1.RemediationJob{
@@ -448,8 +449,8 @@ func TestSourceProviderReconciler_NotFound_DeletesRunningRJobs(t *testing.T) {
 // is propagated as a reconciler error.
 func TestSourceProviderReconciler_FingerprintError_ReturnsError(t *testing.T) {
 	p := &fakeSourceProvider{
-		name:       "k8sgpt",
-		objectType: &v1alpha1.Result{},
+		name:       "native",
+		objectType: &corev1.ConfigMap{},
 		finding: &domain.Finding{
 			Kind: "Pod", Namespace: "default", ParentObject: "my-deploy",
 			Errors: "not-json",
@@ -495,8 +496,8 @@ func makeFinding() *domain.Finding {
 func TestStabilisationWindow_WindowZeroImmediate(t *testing.T) {
 	finding := makeFinding()
 	p := &fakeSourceProvider{
-		name:       "k8sgpt",
-		objectType: &v1alpha1.Result{},
+		name:       "native",
+		objectType: &corev1.ConfigMap{},
 		finding:    finding,
 	}
 	obj := makeWatchedObject("r1", "default")
@@ -525,8 +526,8 @@ func TestStabilisationWindow_WindowZeroImmediate(t *testing.T) {
 func TestStabilisationWindow_WindowNotElapsed(t *testing.T) {
 	finding := makeFinding()
 	p := &fakeSourceProvider{
-		name:       "k8sgpt",
-		objectType: &v1alpha1.Result{},
+		name:       "native",
+		objectType: &corev1.ConfigMap{},
 		finding:    finding,
 	}
 	obj := makeWatchedObject("r1", "default")
@@ -561,8 +562,8 @@ func TestStabilisationWindow_WindowElapsed(t *testing.T) {
 	}
 
 	p := &fakeSourceProvider{
-		name:       "k8sgpt",
-		objectType: &v1alpha1.Result{},
+		name:       "native",
+		objectType: &corev1.ConfigMap{},
 		finding:    finding,
 	}
 	obj := makeWatchedObject("r1", "default")
@@ -601,8 +602,8 @@ func TestStabilisationWindow_SecondSightWithinWindow(t *testing.T) {
 	}
 
 	p := &fakeSourceProvider{
-		name:       "k8sgpt",
-		objectType: &v1alpha1.Result{},
+		name:       "native",
+		objectType: &corev1.ConfigMap{},
 		finding:    finding,
 	}
 	obj := makeWatchedObject("r1", "default")
@@ -647,8 +648,8 @@ func TestStabilisationWindow_FindingClearsResetsWindow(t *testing.T) {
 	}
 
 	p := &fakeSourceProvider{
-		name:       "k8sgpt",
-		objectType: &v1alpha1.Result{},
+		name:       "native",
+		objectType: &corev1.ConfigMap{},
 		finding:    finding,
 	}
 	obj := makeWatchedObject("r1", "default")
@@ -700,10 +701,10 @@ func TestStabilisationWindow_NotFoundClearsMap(t *testing.T) {
 	}
 
 	p := &fakeSourceProvider{
-		name:       "k8sgpt",
-		objectType: &v1alpha1.Result{},
+		name:       "native",
+		objectType: &corev1.ConfigMap{},
 	}
-	// No Result object in the client — it has been deleted.
+	// No watched object in the client — it has been deleted.
 	c := newTestClient()
 	window := 2 * time.Minute
 	r := newTestReconcilerWithWindow(p, c, window)

@@ -17,6 +17,6 @@ func TestJobBuilder_InterfaceIsImportable(t *testing.T) {
 func TestSourceProvider_HasThreeMethods(t *testing.T) {
 	// This test exists to ensure SourceProvider remains importable from this package.
 	// Actual interface satisfaction is verified by compile-time assertions in the
-	// concrete implementation packages (internal/provider/k8sgpt, internal/jobbuilder).
+	// concrete implementation packages (internal/provider/native, internal/jobbuilder).
 	var _ domain.SourceProvider
 }

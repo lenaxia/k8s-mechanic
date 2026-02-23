@@ -71,7 +71,7 @@ func FindingFingerprint(f *Finding) (string, error) {
 // is a pure function and not provider-specific.
 type SourceProvider interface {
 	// ProviderName returns a stable, lowercase identifier for this provider.
-	// Used as the value of RemediationJobSpec.SourceType (e.g. "k8sgpt", "prometheus").
+	// Used as the value of RemediationJobSpec.SourceType (e.g. "native", "prometheus").
 	// Must be unique across all registered providers.
 	ProviderName() string
 
@@ -107,7 +107,7 @@ type Finding struct {
 	// Sensitive fields must be stripped by the provider before populating this field.
 	Errors string
 
-	// Details is a human-readable explanation of the finding (e.g. k8sgpt LLM analysis).
+	// Details is a human-readable explanation of the finding.
 	// May be empty.
 	Details string
 
@@ -117,7 +117,7 @@ type Finding struct {
 
 // SourceRef is a back-reference to the native object that produced a Finding.
 type SourceRef struct {
-	// APIVersion of the native object (e.g. "core.k8sgpt.ai/v1alpha1").
+	// APIVersion of the native object (e.g. "v1", "apps/v1").
 	APIVersion string
 
 	// Kind of the native object (e.g. "Result").

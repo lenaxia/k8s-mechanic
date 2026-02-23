@@ -9,45 +9,25 @@ No external operators required.
 
 ## How it works
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│  Kubernetes Cluster                                                  │
-│                                                                      │
-│  ┌──────────────────────────────────────────────────────────────┐   │
-│  │  mendabot-watcher (Deployment)                                │   │
-│  │                                                               │   │
-│  │  SourceProviderReconcilers (one per resource type)            │   │
-│  │  - watches Pods, Deployments, StatefulSets, PVCs, Nodes, Jobs │   │
-│  │  - extracts findings, deduplicates by fingerprint             │   │
-│  │  - creates RemediationJob CRDs                                │   │
-│  │                                                               │   │
-│  │  RemediationJobReconciler                                     │   │
-│  │  - watches RemediationJob CRDs                                │   │
-│  │  - enforces MAX_CONCURRENT_JOBS                               │   │
-│  │  - creates batch/v1 Jobs, syncs status back                   │   │
-│  └───────────────────────┬──────────────────────────────────────┘   │
-│                           │ creates                                   │
-│              ┌────────────▼────────────┐                             │
-│              │  RemediationJob CRDs    │                             │
-│              │  (rjob)                 │                             │
-│              │  - durable dedup state  │                             │
-│              │  - survives restarts    │                             │
-│              └────────────┬────────────┘                             │
-│                           │ creates                                   │
-│              ┌────────────▼────────────┐                             │
-│              │  mendabot-agent Job     │                             │
-│              │  (one per finding)      │                             │
-│              │                         │                             │
-│              │  init: git clone repo   │                             │
-│              │  main: opencode run     │                             │
-│              │    kubectl (read-only)  │                             │
-│              │    gh pr create         │                             │
-│              └────────────┬────────────┘                             │
-└───────────────────────────┼─────────────────────────────────────────┘
-                            │ opens PR
-           ┌────────────────▼────────────────┐
-           │  GitOps repository (GitHub)      │
-           └──────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph cluster["Kubernetes Cluster"]
+        subgraph watcher["mendabot-watcher (Deployment)"]
+            SPR["SourceProviderReconcilers\none per resource type\n─────────────────────\nwatches Pods, Deployments,\nStatefulSets, PVCs, Nodes, Jobs\nextracts findings\ndeduplicates by fingerprint"]
+            RJR["RemediationJobReconciler\n─────────────────────\nwatches RemediationJob CRDs\nenforces MAX_CONCURRENT_JOBS\nsyncs Job status back"]
+        end
+
+        RJ["RemediationJob CRDs\n(rjob)\n─────────────────────\ndurable dedup state\nsurvives restarts"]
+
+        AJ["mendabot-agent Job\none per finding\n─────────────────────\ninit: git clone repo\nmain: opencode run\n  kubectl read-only\n  gh pr create"]
+    end
+
+    GH["GitOps repository\nGitHub"]
+
+    SPR -->|creates| RJ
+    RJ -->|watched by| RJR
+    RJR -->|creates| AJ
+    AJ -->|opens PR| GH
 ```
 
 1. `mendabot-watcher` watches Pods, Deployments, StatefulSets, PVCs, Nodes, and Jobs
@@ -113,39 +93,22 @@ mendabot-f4e2a1c85b67         Failed      Node         Node/worker-03           
 
 ### RemediationJob lifecycle
 
-```
-                  ┌─────────┐
-  finding         │         │
-  detected ──────▶│ Pending │
-                  │         │
-                  └────┬────┘
-                       │  MAX_CONCURRENT_JOBS slot available
-                       ▼
-                  ┌────────────┐
-                  │            │
-                  │ Dispatched │  batch/v1 Job created
-                  │            │
-                  └─────┬──────┘
-                        │  Job starts running
-                        ▼
-                  ┌─────────┐
-                  │         │
-                  │ Running │
-                  │         │
-                  └────┬────┘
-           ┌───────────┼───────────┐
-           │           │           │
-           ▼           ▼           ▼
-      ┌─────────┐ ┌────────┐ ┌───────────┐
-      │         │ │        │ │           │
-      │Succeeded│ │ Failed │ │ Cancelled │
-      │         │ │        │ │           │
-      └─────────┘ └────┬───┘ └───────────┘
-                       │
-                       │  re-triggers on next
-                       │  reconcile of source
-                       ▼
-                  new RemediationJob
+```mermaid
+stateDiagram-v2
+    [*] --> Pending : finding detected
+
+    Pending --> Dispatched : MAX_CONCURRENT_JOBS\nslot available
+    Pending --> Cancelled : source object deleted
+
+    Dispatched --> Running : Job pod scheduled
+
+    Running --> Succeeded : agent Job completed
+    Running --> Failed : exit non-zero or\ndeadline exceeded
+    Running --> Cancelled : source object deleted
+
+    Failed --> [*] : re-triggers on next\nreconcile of source
+    Succeeded --> [*]
+    Cancelled --> [*]
 ```
 
 - **Pending** — finding detected, waiting for a concurrent-job slot

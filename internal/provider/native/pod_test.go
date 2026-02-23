@@ -642,6 +642,65 @@ func TestSourceRef_IsPodV1(t *testing.T) {
 	}
 }
 
+// TestInitContainerCrashLoop: containerStatuses is empty/healthy but an init container
+// is Waiting with reason "CrashLoopBackOff" → ExtractFinding returns a non-nil finding.
+func TestInitContainerCrashLoop(t *testing.T) {
+	s := newTestScheme()
+	c := fake.NewClientBuilder().WithScheme(s).Build()
+	p := NewPodProvider(c)
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "init-crash-pod",
+			Namespace: "default",
+			UID:       "init-crash-pod-uid",
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodPending,
+			// No failing main containers.
+			ContainerStatuses: []corev1.ContainerStatus{
+				{
+					Name:  "app",
+					Ready: false,
+					State: corev1.ContainerState{
+						Waiting: &corev1.ContainerStateWaiting{
+							Reason: "PodInitializing",
+						},
+					},
+				},
+			},
+			// Init container is crash-looping.
+			InitContainerStatuses: []corev1.ContainerStatus{
+				{
+					Name: "init-setup",
+					State: corev1.ContainerState{
+						Waiting: &corev1.ContainerStateWaiting{
+							Reason: "CrashLoopBackOff",
+						},
+					},
+					LastTerminationState: corev1.ContainerState{
+						Terminated: &corev1.ContainerStateTerminated{
+							Reason:   "Error",
+							ExitCode: 1,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	finding, err := p.ExtractFinding(pod)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if finding == nil {
+		t.Fatal("expected non-nil finding for init container CrashLoopBackOff, got nil")
+	}
+	assertErrorsJSON(t, finding.Errors)
+	assertErrorTextContains(t, finding.Errors, "init-setup")
+	assertErrorTextContains(t, finding.Errors, "CrashLoopBackOff")
+}
+
 // assertErrorsJSON verifies that the errors string is valid JSON with at least one entry.
 func assertErrorsJSON(t *testing.T, errors string) {
 	t.Helper()

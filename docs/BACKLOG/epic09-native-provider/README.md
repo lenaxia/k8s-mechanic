@@ -170,18 +170,18 @@ not gate on `sourceType`.
 
 | Story | File | Status |
 |-------|------|--------|
-| Promote Fingerprint to domain function | [STORY_01_fingerprint_domain.md](STORY_01_fingerprint_domain.md) | Not Started |
-| Slim SourceProvider interface + update SourceProviderReconciler | [STORY_02_source_provider_interface.md](STORY_02_source_provider_interface.md) | Not Started |
+| Promote Fingerprint to domain function | [STORY_01_fingerprint_domain.md](STORY_01_fingerprint_domain.md) | Complete |
+| Slim SourceProvider interface + update SourceProviderReconciler | [STORY_02_source_provider_interface.md](STORY_02_source_provider_interface.md) | Complete |
 | getParent owner-reference traversal | [STORY_03_parent_traversal.md](STORY_03_parent_traversal.md) | Complete |
-| PodProvider | [STORY_04_pod_provider.md](STORY_04_pod_provider.md) | Not Started |
-| DeploymentProvider | [STORY_05_deployment_provider.md](STORY_05_deployment_provider.md) | Not Started |
-| PVCProvider | [STORY_06_pvc_provider.md](STORY_06_pvc_provider.md) | Not Started |
-| NodeProvider | [STORY_07_node_provider.md](STORY_07_node_provider.md) | Not Started |
-| StatefulSetProvider | [STORY_10_statefulset_provider.md](STORY_10_statefulset_provider.md) | Not Started |
-| JobProvider | [STORY_11_job_provider.md](STORY_11_job_provider.md) | Not Started |
-| Wire native providers into main.go | [STORY_08_main_wiring.md](STORY_08_main_wiring.md) | Not Started |
-| Stabilisation window | [STORY_12_stabilisation_window.md](STORY_12_stabilisation_window.md) | Not Started |
-| Remove k8sgpt | [STORY_09_remove_k8sgpt.md](STORY_09_remove_k8sgpt.md) | Not Started |
+| PodProvider | [STORY_04_pod_provider.md](STORY_04_pod_provider.md) | Complete |
+| DeploymentProvider | [STORY_05_deployment_provider.md](STORY_05_deployment_provider.md) | Complete |
+| PVCProvider | [STORY_06_pvc_provider.md](STORY_06_pvc_provider.md) | Complete |
+| NodeProvider | [STORY_07_node_provider.md](STORY_07_node_provider.md) | Complete |
+| StatefulSetProvider | [STORY_10_statefulset_provider.md](STORY_10_statefulset_provider.md) | Complete |
+| JobProvider | [STORY_11_job_provider.md](STORY_11_job_provider.md) | Complete |
+| Wire native providers into main.go | [STORY_08_main_wiring.md](STORY_08_main_wiring.md) | Complete |
+| Stabilisation window | [STORY_12_stabilisation_window.md](STORY_12_stabilisation_window.md) | Complete |
+| Remove k8sgpt | [STORY_09_remove_k8sgpt.md](STORY_09_remove_k8sgpt.md) | Complete |
 
 ## Implementation Order
 

@@ -447,8 +447,10 @@ func TestCircuitBreakerPersistenceAcrossRestarts(t *testing.T) {
 	if allowed1 != allowed2 {
 		t.Errorf("allowed mismatch: first=%v, second=%v", allowed1, allowed2)
 	}
-	// Allow for tiny differences due to time passing between calls
-	if (remaining1 - remaining2).Abs() > time.Millisecond {
+	// Allow for differences due to time passing between the two calls.
+	// Both instances read the same ConfigMap timestamp; remaining diverges only by
+	// the real elapsed time between the two ShouldAllow invocations.
+	if (remaining1 - remaining2).Abs() > 100*time.Millisecond {
 		t.Errorf("remaining mismatch: first=%v, second=%v (diff: %v)", remaining1, remaining2, remaining1-remaining2)
 	}
 
@@ -495,8 +497,12 @@ func TestConcurrentChainDepthTracking(t *testing.T) {
 		go func(id int) {
 			defer wg.Done()
 
+			// Deep-copy parentRJob to avoid a data race: fake.NewClientBuilder().WithObjects()
+			// calls obj.SetResourceVersion("999") on the passed object during Build(), which
+			// mutates the shared pointer concurrently across goroutines.
+			localParent := parentRJob.DeepCopyObject().(client.Object)
 			// Each goroutine gets its own client
-			c := fake.NewClientBuilder().WithScheme(s).WithObjects(parentRJob).Build()
+			c := fake.NewClientBuilder().WithScheme(s).WithObjects(localParent).Build()
 			p := native.NewJobProvider(c, cfg)
 
 			job := &batchv1.Job{

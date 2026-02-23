@@ -2,21 +2,27 @@ package provider_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	v1alpha1 "github.com/lenaxia/k8s-mendabot/api/v1alpha1"
+	"github.com/lenaxia/k8s-mendabot/internal/cascade"
+	"github.com/lenaxia/k8s-mendabot/internal/circuitbreaker"
 	"github.com/lenaxia/k8s-mendabot/internal/config"
 	"github.com/lenaxia/k8s-mendabot/internal/domain"
+	"github.com/lenaxia/k8s-mendabot/internal/metrics"
 	"github.com/lenaxia/k8s-mendabot/internal/provider"
 )
 
@@ -658,7 +664,7 @@ func TestStabilisationWindow_FindingClearsResetsWindow(t *testing.T) {
 	r := newTestReconcilerWithWindow(p, c, window)
 
 	// Pre-populate firstSeen as if we already recorded a first sight.
-	r.FirstSeen()[fp] = time.Now().Add(-30 * time.Second)
+	r.SetFirstSeenForTest(fp, time.Now().Add(-30*time.Second))
 
 	// Now simulate the finding clearing: set provider to return nil.
 	p.finding = nil
@@ -710,8 +716,8 @@ func TestStabilisationWindow_NotFoundClearsMap(t *testing.T) {
 	r := newTestReconcilerWithWindow(p, c, window)
 
 	// Pre-populate firstSeen with an entry.
-	r.FirstSeen()[fp] = time.Now()
-	r.FirstSeen()["other-fp"] = time.Now()
+	r.SetFirstSeenForTest(fp, time.Now())
+	r.SetFirstSeenForTest("other-fp", time.Now())
 
 	_, err = r.Reconcile(context.Background(), reqFor("r1", "default"))
 	if err != nil {
@@ -720,5 +726,387 @@ func TestStabilisationWindow_NotFoundClearsMap(t *testing.T) {
 
 	if len(r.FirstSeen()) != 0 {
 		t.Errorf("expected firstSeen to be cleared on not-found, got %d entries", len(r.FirstSeen()))
+	}
+}
+
+// TestReconcile_SelfRemediation_NoDoubleCountAttempt verifies that creating a self-remediation
+// RemediationJob does NOT increment selfRemediationAttemptsTotal in the provider.
+// The attempt is recorded only once: when the job completes (in remediationjob_controller.go).
+func TestReconcile_SelfRemediation_NoDoubleCountAttempt(t *testing.T) {
+	metrics.ResetMetrics()
+	t.Cleanup(metrics.ResetMetrics)
+
+	finding := &domain.Finding{
+		Kind:              "Job",
+		Name:              "mendabot-agent-abc123",
+		Namespace:         "mendabot",
+		ParentObject:      "Job/mendabot-agent-abc123",
+		Errors:            `[{"text":"job failed"}]`,
+		IsSelfRemediation: true,
+		ChainDepth:        1,
+	}
+
+	p := &fakeSourceProvider{
+		name:       "native",
+		objectType: &corev1.ConfigMap{},
+		finding:    finding,
+	}
+
+	obj := makeWatchedObject("r1", "mendabot")
+	c := newTestClient(obj)
+	r := &provider.SourceProviderReconciler{
+		Client:   c,
+		Scheme:   newTestScheme(),
+		Cfg:      config.Config{AgentNamespace: agentNamespace, SelfRemediationMaxDepth: 3},
+		Provider: p,
+	}
+
+	_, err := r.Reconcile(context.Background(), reqFor("r1", "mendabot"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify no self-remediation attempt was recorded at dispatch time.
+	// Both success=true and success=false counters must be zero.
+	successCount := testutil.ToFloat64(
+		metrics.SelfRemediationAttemptsTotal().WithLabelValues("native", "mendabot", "true"),
+	)
+	failureCount := testutil.ToFloat64(
+		metrics.SelfRemediationAttemptsTotal().WithLabelValues("native", "mendabot", "false"),
+	)
+	if successCount != 0 {
+		t.Errorf("selfRemediationAttemptsTotal{success=true} = %v, want 0 (no pre-counting at dispatch)", successCount)
+	}
+	if failureCount != 0 {
+		t.Errorf("selfRemediationAttemptsTotal{success=false} = %v, want 0 (no pre-counting at dispatch)", failureCount)
+	}
+}
+
+// TestReconcile_MaxDepthExceeded_MetricFires verifies that when a self-remediation finding
+// has ChainDepth >= SelfRemediationMaxDepth, the mendabot_max_depth_exceeded_total counter fires.
+func TestReconcile_MaxDepthExceeded_MetricFires(t *testing.T) {
+	metrics.ResetMetrics()
+	t.Cleanup(metrics.ResetMetrics)
+
+	// ChainDepth == SelfRemediationMaxDepth: should fire the metric
+	finding := &domain.Finding{
+		Kind:              "Job",
+		Name:              "mendabot-agent-deep",
+		Namespace:         "mendabot",
+		ParentObject:      "Job/mendabot-agent-deep",
+		Errors:            `[{"text":"job failed at depth 2"}]`,
+		IsSelfRemediation: true,
+		ChainDepth:        2,
+	}
+
+	p := &fakeSourceProvider{
+		name:       "native",
+		objectType: &corev1.ConfigMap{},
+		finding:    finding,
+	}
+
+	obj := makeWatchedObject("r1", "mendabot")
+	c := newTestClient(obj)
+	r := &provider.SourceProviderReconciler{
+		Client:   c,
+		Scheme:   newTestScheme(),
+		Cfg:      config.Config{AgentNamespace: agentNamespace, SelfRemediationMaxDepth: 2},
+		Provider: p,
+	}
+
+	_, err := r.Reconcile(context.Background(), reqFor("r1", "mendabot"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// mendabot_max_depth_exceeded_total must have incremented at least once.
+	count := testutil.ToFloat64(
+		metrics.MaxDepthExceededTotal().WithLabelValues("native", "mendabot", "2"),
+	)
+	if count < 1 {
+		t.Errorf("mendabot_max_depth_exceeded_total{depth=2} = %v, want >= 1", count)
+	}
+}
+
+// fakeCascadeChecker always suppresses with a fixed reason for testing.
+type fakeCascadeChecker struct {
+	suppress bool
+	reason   string
+}
+
+func (f *fakeCascadeChecker) ShouldSuppress(_ context.Context, _ *domain.Finding, _ client.Client) (bool, string, error) {
+	return f.suppress, f.reason, nil
+}
+
+var _ cascade.Checker = (*fakeCascadeChecker)(nil)
+
+// TestReconcile_CircuitBreakerBlocked_EmitsEvent verifies that when the circuit breaker fires
+// (self-remediation cooldown active), a Warning event with reason CircuitBreakerOpened is emitted.
+func TestReconcile_CircuitBreakerBlocked_EmitsEvent(t *testing.T) {
+	metrics.ResetMetrics()
+	t.Cleanup(metrics.ResetMetrics)
+
+	// Create a ConfigMap to act as the circuit breaker state store, with a recent
+	// last-self-remediation timestamp so the circuit breaker considers itself active.
+	cbConfigMap := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "mendabot-circuit-breaker",
+			Namespace: agentNamespace,
+		},
+		Data: map[string]string{
+			// Set last self-remediation to now so cooldown is active.
+			"last-self-remediation": time.Now().UTC().Format(time.RFC3339),
+		},
+	}
+
+	finding := &domain.Finding{
+		Kind:              "Job",
+		Name:              "mendabot-agent-abc",
+		Namespace:         agentNamespace,
+		ParentObject:      "Job/mendabot-agent-abc",
+		Errors:            `[{"text":"job failed"}]`,
+		IsSelfRemediation: true,
+		ChainDepth:        1,
+	}
+
+	p := &fakeSourceProvider{
+		name:       "native",
+		objectType: &corev1.ConfigMap{},
+		finding:    finding,
+	}
+
+	obj := makeWatchedObject("r1", agentNamespace)
+	cooldown := 5 * time.Minute
+	c := newTestClient(obj, cbConfigMap)
+	fakeRecorder := record.NewFakeRecorder(10)
+	r := &provider.SourceProviderReconciler{
+		Client:        c,
+		Scheme:        newTestScheme(),
+		Cfg:           config.Config{AgentNamespace: agentNamespace, SelfRemediationCooldown: cooldown},
+		Provider:      p,
+		EventRecorder: fakeRecorder,
+	}
+	r.SetCircuitBreakerForTest(circuitbreaker.New(c, agentNamespace, cooldown))
+
+	_, err := r.Reconcile(context.Background(), reqFor("r1", agentNamespace))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	select {
+	case ev := <-fakeRecorder.Events:
+		if !strings.Contains(ev, "CircuitBreakerOpened") {
+			t.Errorf("expected CircuitBreakerOpened event, got: %s", ev)
+		}
+	default:
+		t.Error("expected a CircuitBreakerOpened event to be emitted, got none")
+	}
+}
+
+// TestReconcile_DeepCascade_EmitsEvent verifies that when a self-remediation finding has
+// ChainDepth > 1, a Warning event with reason DeepCascadeDetected is emitted.
+func TestReconcile_DeepCascade_EmitsEvent(t *testing.T) {
+	metrics.ResetMetrics()
+	t.Cleanup(metrics.ResetMetrics)
+
+	finding := &domain.Finding{
+		Kind:              "Job",
+		Name:              "mendabot-agent-deep",
+		Namespace:         agentNamespace,
+		ParentObject:      "Job/mendabot-agent-deep",
+		Errors:            `[{"text":"deep cascade"}]`,
+		IsSelfRemediation: true,
+		ChainDepth:        2,
+	}
+
+	p := &fakeSourceProvider{
+		name:       "native",
+		objectType: &corev1.ConfigMap{},
+		finding:    finding,
+	}
+
+	obj := makeWatchedObject("r1", agentNamespace)
+	c := newTestClient(obj)
+	fakeRecorder := record.NewFakeRecorder(10)
+	r := &provider.SourceProviderReconciler{
+		Client:        c,
+		Scheme:        newTestScheme(),
+		Cfg:           config.Config{AgentNamespace: agentNamespace, SelfRemediationMaxDepth: 3},
+		Provider:      p,
+		EventRecorder: fakeRecorder,
+	}
+	r.SetCascadeCheckerForTest(&fakeCascadeChecker{suppress: false})
+
+	_, err := r.Reconcile(context.Background(), reqFor("r1", agentNamespace))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	select {
+	case ev := <-fakeRecorder.Events:
+		if !strings.Contains(ev, "DeepCascadeDetected") {
+			t.Errorf("expected DeepCascadeDetected event, got: %s", ev)
+		}
+	default:
+		t.Error("expected a DeepCascadeDetected event to be emitted, got none")
+	}
+}
+
+// TestReconcile_InfrastructureCascadeSuppressed_EmitsEvent verifies that when the cascade
+// checker suppresses a finding, a Warning event with reason InfrastructureCascadeSuppressed
+// is emitted.
+func TestReconcile_InfrastructureCascadeSuppressed_EmitsEvent(t *testing.T) {
+	metrics.ResetMetrics()
+	t.Cleanup(metrics.ResetMetrics)
+
+	finding := &domain.Finding{
+		Kind:      "Pod",
+		Name:      "pod-abc",
+		Namespace: "default",
+		Errors:    `[{"text":"node failure"}]`,
+	}
+
+	p := &fakeSourceProvider{
+		name:       "native",
+		objectType: &corev1.ConfigMap{},
+		finding:    finding,
+	}
+
+	obj := makeWatchedObject("r1", "default")
+	c := newTestClient(obj)
+	fakeRecorder := record.NewFakeRecorder(10)
+	r := &provider.SourceProviderReconciler{
+		Client:        c,
+		Scheme:        newTestScheme(),
+		Cfg:           config.Config{AgentNamespace: agentNamespace, DisableCascadeCheck: false},
+		Provider:      p,
+		EventRecorder: fakeRecorder,
+	}
+	r.SetCascadeCheckerForTest(&fakeCascadeChecker{
+		suppress: true,
+		reason:   "node_failure: node-01 is NotReady",
+	})
+
+	_, err := r.Reconcile(context.Background(), reqFor("r1", "default"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	select {
+	case ev := <-fakeRecorder.Events:
+		if !strings.Contains(ev, "InfrastructureCascadeSuppressed") {
+			t.Errorf("expected InfrastructureCascadeSuppressed event, got: %s", ev)
+		}
+	default:
+		t.Error("expected an InfrastructureCascadeSuppressed event to be emitted, got none")
+	}
+}
+
+// TestReconcile_NilEventRecorder_NoPanic verifies that when EventRecorder is nil and the
+// circuit breaker fires, the reconciler returns normally without panicking.
+func TestReconcile_NilEventRecorder_NoPanic(t *testing.T) {
+	metrics.ResetMetrics()
+	t.Cleanup(metrics.ResetMetrics)
+
+	cbConfigMap := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "mendabot-circuit-breaker",
+			Namespace: agentNamespace,
+		},
+		Data: map[string]string{
+			"last-self-remediation": time.Now().UTC().Format(time.RFC3339),
+		},
+	}
+
+	finding := &domain.Finding{
+		Kind:              "Job",
+		Name:              "mendabot-agent-nil-recorder",
+		Namespace:         agentNamespace,
+		ParentObject:      "Job/mendabot-agent-nil-recorder",
+		Errors:            `[{"text":"job failed"}]`,
+		IsSelfRemediation: true,
+		ChainDepth:        1,
+	}
+
+	p := &fakeSourceProvider{
+		name:       "native",
+		objectType: &corev1.ConfigMap{},
+		finding:    finding,
+	}
+
+	obj := makeWatchedObject("r1", agentNamespace)
+	cooldown := 5 * time.Minute
+	c := newTestClient(obj, cbConfigMap)
+	r := &provider.SourceProviderReconciler{
+		Client:        c,
+		Scheme:        newTestScheme(),
+		Cfg:           config.Config{AgentNamespace: agentNamespace, SelfRemediationCooldown: cooldown},
+		Provider:      p,
+		EventRecorder: nil, // explicitly nil
+	}
+	r.SetCircuitBreakerForTest(circuitbreaker.New(c, agentNamespace, cooldown))
+
+	// Must not panic
+	_, err := r.Reconcile(context.Background(), reqFor("r1", agentNamespace))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// TestReconcile_DisableCascadeCheck_Bypasses verifies that DisableCascadeCheck=true
+// lets a self-remediation finding through without cascade suppression.
+func TestReconcile_DisableCascadeCheck_Bypasses(t *testing.T) {
+	metrics.ResetMetrics()
+	t.Cleanup(metrics.ResetMetrics)
+
+	finding := &domain.Finding{
+		Kind:              "Job",
+		Name:              "mendabot-agent-abc",
+		Namespace:         "mendabot",
+		ParentObject:      "Job/mendabot-agent-abc",
+		Errors:            `[{"text":"job failed"}]`,
+		IsSelfRemediation: true,
+		ChainDepth:        1,
+	}
+
+	p := &fakeSourceProvider{
+		name:       "native",
+		objectType: &corev1.ConfigMap{},
+		finding:    finding,
+	}
+
+	obj := makeWatchedObject("r1", "mendabot")
+	c := newTestClient(obj)
+	r := &provider.SourceProviderReconciler{
+		Client: c,
+		Scheme: newTestScheme(),
+		Cfg: config.Config{
+			AgentNamespace:          agentNamespace,
+			SelfRemediationMaxDepth: 3,
+			DisableCascadeCheck:     true,
+		},
+		Provider: p,
+	}
+
+	_, err := r.Reconcile(context.Background(), reqFor("r1", "mendabot"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// A RemediationJob should have been created (cascade suppression did not fire).
+	var list v1alpha1.RemediationJobList
+	if err := c.List(context.Background(), &list, client.InNamespace(agentNamespace)); err != nil {
+		t.Fatalf("list error: %v", err)
+	}
+	if len(list.Items) != 1 {
+		t.Errorf("expected 1 RemediationJob (DisableCascadeCheck bypasses suppression), got %d", len(list.Items))
+	}
+
+	// infrastructure_cascade suppression counter must be zero.
+	suppressCount := testutil.ToFloat64(
+		metrics.CascadeSuppressionsTotal().WithLabelValues("native", "mendabot", "infrastructure_cascade"),
+	)
+	if suppressCount != 0 {
+		t.Errorf("cascadeSuppressionsTotal{infrastructure_cascade} = %v, want 0 (DisableCascadeCheck=true)", suppressCount)
 	}
 }

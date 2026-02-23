@@ -54,44 +54,81 @@ production and need an immediate rollback without re-deploying a different binar
 
 ### Test configuration
 
-All correlation integration tests set `cfg.CorrelationWindowSeconds = 1` to keep test
-runtime short. The envtest suite injects the config via the reconciler constructor.
+All correlation integration tests set `cfg.CorrelationWindowSeconds = 1` on the
+reconciler's `Cfg` directly. The envtest suite instantiates the reconciler manually
+(see `internal/controller/suite_test.go`) — inject config by constructing the reconciler
+with the desired `Cfg` value before each test case.
 
-### TC-02 setup
+### Critical: tests must call `Reconcile()` twice
+
+The existing envtest pattern in this project calls `rec.Reconcile(ctx, req)` directly
+and synchronously — there is no background controller loop. The `ctrl.Result{RequeueAfter: ...}`
+returned by the window hold is not automatically acted upon by a manager. Tests must
+replicate the requeue manually:
 
 ```go
-// Create two RemediationJobs with parent prefix match
-rjob1 := makeRJob("my-app-deploy", "default", "Deployment", "my-app")
-rjob2 := makeRJob("my-app-pod", "default", "Pod", "my-app-xyz-abc")
-// Create both, wait 2 seconds (> window of 1s), then check phases
+// TC-02 pattern: two-call test
+ctx := context.Background()
+// First call: window not elapsed → expect RequeueAfter, job still Pending
+result, err := rec.Reconcile(ctx, ctrlReq(rjob1.Name, rjob1.Namespace))
+require.NoError(t, err)
+require.Greater(t, result.RequeueAfter, time.Duration(0))
+
+// Wait for the window to elapse
+time.Sleep(1100 * time.Millisecond) // 10% over the 1s window
+
+// Second call: window elapsed → correlator runs
+_, err = rec.Reconcile(ctx, ctrlReq(rjob1.Name, rjob1.Namespace))
+require.NoError(t, err)
+
+// Now check phase transitions
+var updated v1alpha1.RemediationJob
+require.NoError(t, k8sClient.Get(ctx, client.ObjectKeyFromObject(rjob1), &updated))
+require.Equal(t, v1alpha1.PhaseDispatched, updated.Status.Phase)
 ```
 
-### TC-03 setup
+Apply the same two-call pattern for TC-01, TC-03, and TC-04.
 
-Requires a `Pod` object to exist in the envtest cluster so `PVCPodRule` can call
-`client.Get` and inspect `spec.volumes`. Create a minimal Pod object with a
-`persistentVolumeClaim` volume referencing the PVC name in the PVC finding.
+### TC-05 escape hatch verification
 
-### Escape hatch verification (TC-05)
+Set `r.Correlator = nil` directly on the reconciler before the test. With no correlator,
+a single call to `Reconcile()` must dispatch the job without any `RequeueAfter`:
 
-Set `r.Config.DisableCorrelation = true` on the reconciler. Create two correlated jobs.
-Verify both reach `Dispatched` phase before the window would have elapsed (use a 500ms
-timeout — if they are not dispatched within 500ms, the test fails, indicating the
-window was incorrectly applied).
+```go
+rec.Correlator = nil
+result, err := rec.Reconcile(ctx, ctrlReq(rjob.Name, rjob.Namespace))
+require.NoError(t, err)
+require.Zero(t, result.RequeueAfter, "expected immediate dispatch with no correlation hold")
+```
 
-### `SourceProviderReconciler` treatment of `Suppressed`
+### `SourceProviderReconciler` treatment of `Suppressed` (Gap 5 clarification)
 
-Add `Suppressed` to the set of non-failed terminal phases that `SourceProviderReconciler`
-treats as "already handled" — a finding whose `RemediationJob` is `Suppressed` must not
-trigger a new `RemediationJob` creation. This is a one-line addition to the existing
-phase check in `internal/provider/provider.go`.
+The existing check at `internal/provider/provider.go:248`:
+```go
+if rjob.Status.Phase != v1alpha1.PhaseFailed {
+    return ctrl.Result{}, nil
+}
+```
+already skips any `RemediationJob` whose phase is not `Failed` — including `Suppressed`.
+**No code change is required here.** Verify this by writing a test: create a
+`RemediationJob` with `Phase=Suppressed`, reconcile the source provider, and assert no
+new `RemediationJob` is created. If the test passes without any code change, document
+the finding with a comment in the test: `// Suppressed is handled by the existing
+!= PhaseFailed check; no code change needed`.
+
+Remove the task "Add `Suppressed` to the non-failed phase check in
+`internal/provider/provider.go`" — it is a no-op.
 
 ---
 
 ## Tasks
 
-- [ ] Extend `internal/controller/suite_test.go` with TC-01 through TC-05 (TDD)
-- [ ] Add `Suppressed` to the non-failed phase check in `internal/provider/provider.go`
+- [ ] Extend `internal/controller/suite_test.go` (or a new `correlation_integration_test.go`
+      in the same package) with TC-01 through TC-05, using the two-call `Reconcile()` pattern
+      (first call returns `RequeueAfter`, sleep 1.1s, second call triggers correlation)
+- [ ] Verify via test (no code change needed) that `SourceProviderReconciler` already skips
+      `Suppressed`-phase jobs via the existing `!= PhaseFailed` check at `provider.go:248`;
+      add a comment in the test explaining this
 - [ ] Verify `go test -timeout 60s -race ./internal/controller/...` passes
 - [ ] Verify `go test -timeout 30s -race ./...` passes for all other packages
 - [ ] Run `go build ./...` and `go vet ./...` — must be clean

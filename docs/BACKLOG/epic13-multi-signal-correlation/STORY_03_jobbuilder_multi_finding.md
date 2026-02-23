@@ -83,16 +83,48 @@ if groupID, ok := rjob.Labels[domain.CorrelationGroupIDLabel]; ok && groupID != 
 
 ### Callers to update
 
-- `internal/controller/remediationjob_controller.go` — primary call site
-- Any test helpers that call `Build()` directly
+- `internal/controller/remediationjob_controller.go` — primary call site (`r.JobBuilder.Build(&rjob)` at line 158)
+- `internal/jobbuilder/job_test.go` — all existing calls `b.Build(testRJob)` become `b.Build(testRJob, nil)`
+- `internal/controller/fakes_test.go:25` — `fakeJobBuilder.Build()` implements the
+  `domain.JobBuilder` interface. The method signature and the `fakeJobBuilderCall` struct
+  must both be updated:
+  ```go
+  // Before
+  func (f *fakeJobBuilder) Build(rjob *v1alpha1.RemediationJob) (*batchv1.Job, error)
+
+  // After
+  func (f *fakeJobBuilder) Build(rjob *v1alpha1.RemediationJob, correlatedFindings []v1alpha1.FindingSpec) (*batchv1.Job, error)
+  ```
+  The `fakeJobBuilderCall` struct at `fakes_test.go` should also record `CorrelatedFindings`
+  so controller tests can assert on what was passed.
+- `internal/domain/interfaces.go:12` — the `JobBuilder` interface must be updated to the
+  new two-argument signature. This is a **compiler-breaking change**: the compile-time
+  assertion `var _ domain.JobBuilder = (*Builder)(nil)` at `internal/jobbuilder/job.go`
+  will fail until both the interface and the concrete type agree:
+  ```go
+  // internal/domain/interfaces.go
+  type JobBuilder interface {
+      Build(rjob *v1alpha1.RemediationJob, correlatedFindings []v1alpha1.FindingSpec) (*batchv1.Job, error)
+  }
+  ```
 
 ---
 
 ## Tasks
 
 - [ ] Write new `job_test.go` cases for multi-finding injection (TDD — must fail first)
-- [ ] Update `Builder.Build()` signature and inject `FINDING_CORRELATED_FINDINGS`
-- [ ] Update all call sites of `Build()` to pass `nil` (existing) or the findings slice (STORY_02 path)
+- [ ] Update `internal/domain/interfaces.go:12` — change `JobBuilder.Build()` to the
+      two-argument signature (this is a compiler-breaking change; do it first so the
+      compile-time assertion fails clearly and guides the remaining changes)
+- [ ] Update `Builder.Build()` signature in `internal/jobbuilder/job.go` and inject
+      `FINDING_CORRELATED_FINDINGS` and `FINDING_CORRELATION_GROUP_ID` env vars
+- [ ] Update `fakeJobBuilder.Build()` in `internal/controller/fakes_test.go:25` to the
+      new signature; update `fakeJobBuilderCall` struct to record `CorrelatedFindings`
+- [ ] Update all existing `b.Build(rjob)` calls in `internal/jobbuilder/job_test.go`
+      to `b.Build(rjob, nil)`
+- [ ] Update the call site in `internal/controller/remediationjob_controller.go:158`
+      from `r.JobBuilder.Build(&rjob)` to `r.JobBuilder.Build(&rjob, nil)` as a
+      placeholder — STORY_02 will update this to pass the actual correlated findings
 - [ ] Run `go test -timeout 30s -race ./...` — must pass
 
 ---

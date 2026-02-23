@@ -36,10 +36,13 @@ agent Job that investigates the full group context.
       `MultiPodSameNodeRule`
 - [ ] `RemediationJobReconciler` holds `RemediationJob` objects in `Pending` phase for
       `CORRELATION_WINDOW_SECONDS` (default: 30) before dispatching
-- [ ] After the window, the correlator runs all rules; matching objects receive a
-      `mendabot.io/correlation-group-id` label and all but the primary are transitioned
-      to `Suppressed` phase
-- [ ] `JobBuilder.Build()` accepts a `[]domain.Finding` slice and injects
+- [ ] `Correlator` struct exists in `internal/correlator/correlator.go` with method
+      `Evaluate(ctx, candidate, peers, client) (CorrelationGroup, bool, error)`
+      (returns the group, a found bool, and an error — idiomatic Go "found" pattern)
+- [ ] After the window, the correlator runs all rules; when a match is found, matching
+      objects receive a `mendabot.io/correlation-group-id` label and all but the primary
+      are transitioned to `Suppressed` phase
+- [ ] `JobBuilder.Build()` accepts a `[]v1alpha1.FindingSpec` slice and injects
       `FINDING_CORRELATED_FINDINGS` as a JSON-encoded env var when the slice has > 1 entry
 - [ ] `go test -timeout 30s -race ./...` passes with correlation tests
 - [ ] `DISABLE_CORRELATION=true` env var disables the window and all correlation rules,
@@ -163,7 +166,7 @@ purposes — a finding whose `RemediationJob` is `Suppressed` is not re-triggere
 | `internal/jobbuilder/job.go` | Accept correlated findings; inject `FINDING_CORRELATED_FINDINGS` env var |
 | `internal/jobbuilder/job_test.go` | Tests for multi-finding env injection |
 | `internal/config/config.go` | Add `CorrelationWindowSeconds`, `DisableCorrelation`, `MultiPodThreshold` |
-| `internal/config/config_test.go` | Config parsing tests |
+| `internal/config/config_test.go` | Config parsing tests for new fields |
 | `deploy/kustomize/configmap-prompt.yaml` | Add `FINDING_CORRELATED_FINDINGS` handling instructions |
 
 ### Story execution order

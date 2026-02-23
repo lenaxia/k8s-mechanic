@@ -35,6 +35,13 @@ are the foundation for every subsequent story in this epic.
 - [ ] `api/v1alpha1/remediationjob_types.go` gains:
   - `PhaseSuppressed RemediationJobPhase = "Suppressed"` constant
   - `CorrelationGroupID string` field in `RemediationJobStatus`
+  - The `+kubebuilder:validation:Enum` marker on `RemediationJobStatus.Phase` (line 162)
+    must be updated to include `Suppressed`:
+    `// +kubebuilder:validation:Enum=Pending;Dispatched;Running;Succeeded;Failed;Cancelled;Suppressed`
+    Without this, the API server will reject any status patch that sets `Phase=Suppressed`.
+  - `deploy/kustomize/crd-remediationjob.yaml` must be updated to reflect the new enum
+    value in the `status.phase` validation schema (the `enum:` list under
+    `spec.versions[0].schema.openAPIV3Schema.properties.status.properties.phase`)
 - [ ] `internal/domain/correlation_test.go` tests `NewCorrelationGroupID()` for uniqueness
       and correct length (12 hex chars)
 - [ ] `go test -timeout 30s -race ./internal/domain/...` passes
@@ -111,12 +118,20 @@ CorrelationGroupID string `json:"correlationGroupID,omitempty"`
 
 ---
 
-## Tasks
-
 - [ ] Write `internal/domain/correlation_test.go` (TDD — must fail first)
 - [ ] Write `internal/domain/correlation.go` (interface + types + ID generator)
-- [ ] Add `PhaseSuppressed` and `CorrelationGroupID` to `api/v1alpha1/remediationjob_types.go`
-- [ ] Update `zz_generated_deepcopy` if needed (check if `RemediationJobStatus` deep copy covers new field)
+- [ ] Add `PhaseSuppressed` and `CorrelationGroupID` to `api/v1alpha1/remediationjob_types.go`:
+  - Add `PhaseSuppressed RemediationJobPhase = "Suppressed"` to the phase constants block (after `PhaseCancelled`, line 68)
+  - Add `CorrelationGroupID string \`json:"correlationGroupID,omitempty"\`` to `RemediationJobStatus` (after the `Conditions` field, line 186)
+  - Update the `+kubebuilder:validation:Enum` marker on `RemediationJobStatus.Phase` (line 162) to add `Suppressed`:
+    `// +kubebuilder:validation:Enum=Pending;Dispatched;Running;Succeeded;Failed;Cancelled;Suppressed`
+- [ ] Add `out.Status.CorrelationGroupID = in.Status.CorrelationGroupID` to the hand-written
+      `DeepCopyInto` method in `remediationjob_types.go` (after line 220, where `out.Status.Message`
+      is copied). There is no `zz_generated_deepcopy.go` — deep copy is manual in this file.
+      Every new status field must be explicitly added or it will be silently dropped by
+      `DeepCopyObject()`, corrupting status patches.
+- [ ] Update `deploy/kustomize/crd-remediationjob.yaml`: add `"Suppressed"` to the `enum:` list
+      under `spec.versions[0].schema.openAPIV3Schema.properties.status.properties.phase`
 - [ ] Run `go test -timeout 30s -race ./internal/domain/... ./api/...` — must pass
 
 ---
@@ -131,5 +146,7 @@ CorrelationGroupID string `json:"correlationGroupID,omitempty"`
 ## Definition of Done
 
 - [ ] `CorrelationRule` interface and all supporting types exist and compile
-- [ ] `PhaseSuppressed` is a valid `RemediationJobPhase` constant
+- [ ] `PhaseSuppressed` is a valid `RemediationJobPhase` constant and accepted by the API server
+      (kubebuilder enum marker updated + CRD YAML updated)
+- [ ] `DeepCopyInto` explicitly copies `CorrelationGroupID`
 - [ ] All tests pass

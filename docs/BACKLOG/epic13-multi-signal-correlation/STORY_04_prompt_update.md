@@ -32,61 +32,92 @@ This is a prompt-only change. Zero Go code.
 
 ## Acceptance Criteria
 
-- [ ] `deploy/kustomize/configmap-prompt.yaml` has a new section in STEP 0 (Context
-      Loading) that reads `FINDING_CORRELATED_FINDINGS` when non-empty
-- [ ] The prompt instructs the agent that if `FINDING_CORRELATED_FINDINGS` is set, the
+- [ ] `deploy/kustomize/configmap-prompt.yaml` has a new `=== CORRELATED GROUP ===` section
+      added to the `=== FINDING ===` block (after line 28, after the existing finding fields)
+      referencing `${FINDING_CORRELATED_FINDINGS}` and `${FINDING_CORRELATION_GROUP_ID}`
+- [ ] The prompt instructs the agent that if `FINDING_CORRELATED_FINDINGS` is non-empty, the
       investigation must explain all findings in the group, not just the primary
-- [ ] PR body template includes a `## Correlated Findings` section (only rendered when
-      the env var is non-empty)
-- [ ] A new HARD RULE is added: when `FINDING_CORRELATED_FINDINGS` is set, the agent
-      MUST NOT open separate PRs for the correlated findings — one PR covers the group
-- [ ] Prompt change is reviewed for consistency with the existing STEP 0–10 structure
+- [ ] The `=== PR BODY FORMAT ===` section (line 178) gains a `## Correlated Findings` entry
+      (only rendered by the agent when `FINDING_CORRELATION_GROUP_ID` is non-empty)
+- [ ] A new HARD RULE 8 is added (next sequential number after the existing 7 rules at line 217)
+- [ ] Prompt change is reviewed for consistency with the existing structure (steps are numbered
+      STEP 1–8; HARD RULES are numbered 1–7; there is no STEP 0 or STEP 10)
+- [ ] `kubectl apply -k deploy/kustomize/ --dry-run=client` passes
 
 ---
 
 ## Technical Implementation
 
-### Addition to STEP 0 — Context Loading
+**Prompt structure reference:** The prompt (`deploy/kustomize/configmap-prompt.yaml`) has
+the following top-level sections (no STEP 0 exists; steps run STEP 1–8):
+- `=== FINDING ===` (line 12) — finding fields + self-remediation context
+- `=== ENVIRONMENT ===` (line 30)
+- `=== SELF-REMEDIATION GUIDANCE ===` (line 43)
+- `=== INVESTIGATION STEPS ===` — STEP 1 through STEP 8 (line 84 through line 175)
+- `=== PR BODY FORMAT ===` (line 178)
+- `=== HARD RULES ===` — HARD RULES 1–7 (line 216)
+- `=== DECISION TREE ===` (line 235)
+
+The `configmap-prompt.yaml` is a plain-text template. It is not a shell script. The
+`envsubst` substitution is performed at runtime by `agent-entrypoint.sh` — all `${VAR}`
+references are substituted before the prompt is passed to `opencode`. Write the new
+section as plain text with `${FINDING_CORRELATED_FINDINGS}` and
+`${FINDING_CORRELATION_GROUP_ID}` references; do not write shell conditionals in the prompt.
+
+### Addition to the `=== FINDING ===` section
+
+Add after the `AI analysis` block (after line 28, before `=== ENVIRONMENT ===`):
 
 ```
-CORRELATED_FINDINGS="${FINDING_CORRELATED_FINDINGS:-}"
-CORRELATION_GROUP_ID="${FINDING_CORRELATION_GROUP_ID:-}"
+    Correlated group:
+    ${FINDING_CORRELATION_GROUP_ID}
 
-if [ -n "$CORRELATED_FINDINGS" ]; then
-  echo "=== CORRELATED GROUP: $CORRELATION_GROUP_ID ==="
-  echo "This finding is part of a correlated group. All findings:"
-  echo "$CORRELATED_FINDINGS" | jq -r '.[] | "  - \(.Kind)/\(.Name) in \(.Namespace): \(.Errors | join("; "))"'
-  echo "Your investigation MUST explain the root cause common to ALL findings above."
-  echo "Your PR MUST fix the root cause, not individual symptoms."
-fi
+    Additional findings in this group (JSON array, empty if not correlated):
+    ${FINDING_CORRELATED_FINDINGS}
+
+    If FINDING_CORRELATED_FINDINGS is non-empty, your investigation MUST identify the
+    root cause shared by all findings in the group. Your proposed fix MUST address that
+    root cause. Your PR MUST cover all findings — do not open separate PRs for findings
+    in the same correlated group.
 ```
 
-### New HARD RULE
+### New HARD RULE 8 (next sequential rule; existing rules end at 7)
 
 ```
-HARD RULE 10 — CORRELATED GROUP:
-If FINDING_CORRELATED_FINDINGS is set and non-empty, your proposed fix MUST address
-the shared root cause of all findings in the group. You MUST NOT open multiple PRs for
-findings in the same group. The PR body MUST include a ## Correlated Findings section
-listing all finding IDs in the group and explaining how the fix resolves each.
+    8. If FINDING_CORRELATED_FINDINGS is non-empty, your fix MUST address the shared
+       root cause of all findings in the group. You MUST NOT open multiple PRs for
+       findings in the same correlated group. The PR body MUST include a
+       ## Correlated Findings section listing all finding kinds/names from the group.
 ```
 
-### PR body template addition
+### Addition to `=== PR BODY FORMAT ===`
+
+Add before the closing `*Opened automatically by mendabot*` line:
 
 ```markdown
-## Correlated Findings
-<!-- Only include when CORRELATION_GROUP_ID is set -->
-This PR resolves a correlated group of findings (group: `${CORRELATION_GROUP_ID}`):
-${FINDING_CORRELATED_FINDINGS_SUMMARY}
+    ## Correlated Findings
+    <!-- Include this section only when FINDING_CORRELATION_GROUP_ID is non-empty -->
+    Group ID: `${FINDING_CORRELATION_GROUP_ID}`
+    This PR resolves all findings in the correlated group. Additional findings covered:
+    ${FINDING_CORRELATED_FINDINGS}
 ```
+
+**Note on JSON field names in the prompt:** `FindingSpec` JSON tags are lowercase
+(`kind`, `name`, `namespace`, `parentObject`, `errors`, `details`). If the agent
+uses `jq` to parse `FINDING_CORRELATED_FINDINGS`, it must use lowercase selectors:
+`.kind`, `.name`, `.namespace`. The `errors` field is a JSON-encoded string, not an
+array — to extract error text with `jq` use:
+`.errors | fromjson | map(.text) | join("; ")`
 
 ---
 
 ## Tasks
 
-- [ ] Update `deploy/kustomize/configmap-prompt.yaml` with STEP 0 addition
-- [ ] Add HARD RULE 10 to the prompt's HARD RULES section
-- [ ] Add `## Correlated Findings` section to the PR body template in STEP 10
+- [ ] Update `deploy/kustomize/configmap-prompt.yaml`: add the correlated group block
+      to the `=== FINDING ===` section (after the `AI analysis` block, before `=== ENVIRONMENT ===`)
+- [ ] Add HARD RULE 8 to the `=== HARD RULES ===` section (the existing rules end at 7)
+- [ ] Add `## Correlated Findings` block to the `=== PR BODY FORMAT ===` section
+      (before the closing `*Opened automatically by mendabot*` line)
 - [ ] Verify `kubectl apply -k deploy/kustomize/ --dry-run=client` passes (no YAML errors)
 
 ---
@@ -100,7 +131,8 @@ ${FINDING_CORRELATED_FINDINGS_SUMMARY}
 
 ## Definition of Done
 
-- [ ] Prompt template updated with correlated context handling
-- [ ] HARD RULE 10 added
+- [ ] Prompt template updated with correlated context handling in the `=== FINDING ===` section
+- [ ] HARD RULE 8 added (correct sequential number; no rules 8 or 9 existed before)
+- [ ] `## Correlated Findings` block added to `=== PR BODY FORMAT ===`
 - [ ] `kubectl apply -k deploy/kustomize/ --dry-run=client` passes
 - [ ] No existing tests broken (prompt is in a ConfigMap; no Go tests cover its content directly)

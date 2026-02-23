@@ -100,6 +100,20 @@ func (r SameNamespaceParentRule) Evaluate(
 ownership hierarchy (Deployment > StatefulSet > Pod > others). On a tie, the oldest
 `CreationTimestamp` wins.
 
+**Important — rule applicability:** `ParentObject` is computed by `getParent()` in the
+native providers (`internal/provider/native/`), which walks owner references to find the
+top-level owning resource. For a Pod owned by a ReplicaSet owned by a Deployment, both
+the Deployment finding and the Pod finding will store `ParentObject = "<deployment-name>"`.
+Because they share the same parent name, they also share the same fingerprint and are
+deduplicated by `SourceProviderReconciler` before two `RemediationJob` objects are ever
+created — meaning the correlator never sees them together.
+
+The `SameNamespaceParentRule` is therefore most useful for cross-provider scenarios where
+the same application surfaces findings from two different providers (e.g. a `StatefulSet`
+finding from one provider and a `PVC` finding from another, both with the same
+`ParentObject`). Write tests that reflect this — do not write tests using Pod + Deployment
+from the same native provider, as those will be deduplicated before reaching the correlator.
+
 ### `PVCPodRule`
 
 Requires reading the Pod object from the API to inspect `spec.volumes`. The rule
@@ -130,23 +144,44 @@ func (r MultiPodSameNodeRule) Name() string { return "MultiPodSameNode" }
 
 Logic:
 1. Collect all pod findings (Kind == "Pod") across candidate + peers
-2. Group by the `nodeName` annotation set on the `RemediationJob` by the `PodProvider`
-   (added in this story — see note below)
+2. Group by the `nodeName` annotation (`mendabot.io/node-name`) set on the `RemediationJob`
 3. If any node has >= threshold pod findings: `Matched=true`
 
+**Known limitation — pending/unschedulable pods:** `spec.nodeName` is only populated for
+pods that have been *scheduled* to a node. Pods in `Pending/Unschedulable` state (e.g.
+waiting for PVC, waiting for resources) have an empty `spec.nodeName`. The
+`MultiPodSameNodeRule` will not fire for these pods. It only correlates pods that were
+*running* on a node and are now crashing (e.g. after a node enters `NotReady` mid-run).
+This limitation should be documented in the rule's `Name()` docstring and acknowledged
+in tests.
+
 **Note on nodeName:** `PodProvider.ExtractFinding` must be updated (in this story) to
-annotate the `Finding` with `NodeName string`. The `SourceProviderReconciler` writes this
-into `RemediationJob` annotations as `mendabot.io/node-name`. This is the only provider
-change required by this epic.
+populate `Finding.NodeName` from `pod.Spec.NodeName`. The `SourceProviderReconciler`
+writes this into `RemediationJob` annotations as `mendabot.io/node-name` only when the
+value is non-empty. Pods in `Pending` state will have no annotation and will be excluded
+from this rule's grouping.
 
 ---
 
 ## Tasks
 
-- [ ] Write `internal/correlator/rules_test.go` with table-driven tests for all three rules (TDD)
+- [ ] Write `internal/correlator/rules_test.go` with table-driven tests for all three rules (TDD).
+      **Note on `SameNamespaceParentRule` test cases:** use two `RemediationJob` objects from
+      *different providers* (e.g. a `StatefulSet` finding and a `PVC` finding with the same
+      `ParentObject`). Do not use Pod + Deployment from the same native provider — those would
+      share a fingerprint and be deduplicated before reaching the correlator.
 - [ ] Add `NodeName string` to `domain.Finding` in `internal/domain/provider.go`
-- [ ] Update `PodProvider.ExtractFinding` in `internal/provider/native/pod.go` to populate `NodeName`
-- [ ] Update `SourceProviderReconciler` to write `mendabot.io/node-name` annotation on `RemediationJob` when `finding.NodeName` is non-empty
+- [ ] Update `PodProvider.ExtractFinding` in `internal/provider/native/pod.go` to populate
+      `NodeName` from `pod.Spec.NodeName` (empty for unscheduled/pending pods — that is correct)
+- [ ] Update `SourceProviderReconciler` to write the `mendabot.io/node-name` annotation on the
+      `RemediationJob` when `finding.NodeName != ""`. The exact location is
+      `internal/provider/provider.go` in the `RemediationJob` construction block (around line 266),
+      in the `Annotations` map. Add:
+      ```go
+      if finding.NodeName != "" {
+          annotations["mendabot.io/node-name"] = finding.NodeName
+      }
+      ```
 - [ ] Implement `internal/correlator/rules.go` with all three rules
 - [ ] Run `go test -timeout 30s -race ./...` — must pass
 

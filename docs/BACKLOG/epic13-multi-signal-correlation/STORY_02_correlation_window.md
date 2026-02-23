@@ -98,7 +98,7 @@ if r.Correlator != nil {
     if found {
         isPrimary := group.PrimaryUID == rjob.UID
         if !isPrimary {
-            return ctrl.Result{}, r.transitionSuppressed(ctx, &rjob, group.GroupID)
+            return ctrl.Result{}, r.transitionSuppressed(ctx, &rjob, group.GroupID, group.PrimaryUID)
         }
         // Primary: fall through to dispatch, passing the correlated findings
         return ctrl.Result{}, r.dispatch(ctx, &rjob, group.AllFindings)
@@ -175,12 +175,112 @@ for _, p := range matchedPeers {
 }
 ```
 
+**AllFindings ordering is non-deterministic:** The `matchedPeers` slice is populated from
+a `client.List` call whose return order is not guaranteed. As a result, the element order
+in `AllFindings` (and therefore the value of `FINDING_CORRELATED_FINDINGS`) can differ
+between runs. This is acceptable — the agent must treat the list as an unordered set of
+related findings. However, tests that assert on the `FINDING_CORRELATED_FINDINGS` env var
+value **must** sort both the expected and actual `FindingSpec` slices (e.g. by
+`finding.Name`) before comparing. Do not write tests that hard-code a specific element
+order. Likewise, the reconciler and job builder must not depend on element order.
+
 ### `transitionSuppressed`
 
 Patches the `RemediationJob` status phase to `Suppressed`, sets
-`status.correlationGroupID`, and patches the correlation labels onto the object metadata.
+`status.correlationGroupID`, adds a `ConditionCorrelationSuppressed` Condition to
+`status.conditions`, and patches the correlation labels onto the object metadata.
 Uses two separate patches: one for status (`r.Status().Patch`) and one for labels
 (`r.Patch`) to avoid overwriting other status fields.
+
+Every phase transition in the reconciler that results in a terminal state sets a
+Condition entry — this makes the phase transition observable via standard Kubernetes
+tooling (`kubectl get rjob -o yaml`). Mirror the pattern used by the
+`PhaseSucceeded`/`PhaseFailed` transition at `remediationjob_controller.go:90`:
+
+```go
+// Add ConditionCorrelationSuppressed = "CorrelationSuppressed" constant in
+// api/v1alpha1/remediationjob_types.go alongside the existing condition constants.
+
+const ConditionCorrelationSuppressed = "CorrelationSuppressed"
+
+// In transitionSuppressed:
+rjobCopy := rjob.DeepCopyObject().(*v1alpha1.RemediationJob)
+rjob.Status.Phase = v1alpha1.PhaseSuppressed
+rjob.Status.CorrelationGroupID = groupID
+apimeta.SetStatusCondition(&rjob.Status.Conditions, metav1.Condition{
+    Type:               v1alpha1.ConditionCorrelationSuppressed,
+    Status:             metav1.ConditionTrue,
+    Reason:             "CorrelatedGroupFound",
+    Message:            fmt.Sprintf("suppressed: primary job UID %s handles investigation", string(primaryUID)),
+    LastTransitionTime: metav1.Now(),
+})
+if err := r.Status().Patch(ctx, rjob, client.MergeFrom(rjobCopy)); err != nil {
+    return err
+}
+// Label patch (separate to avoid clobbering status)
+rjobCopy2 := rjob.DeepCopyObject().(*v1alpha1.RemediationJob)
+if rjob.Labels == nil {
+    rjob.Labels = map[string]string{}
+}
+rjob.Labels[domain.CorrelationGroupIDLabel] = groupID
+rjob.Labels[domain.CorrelationGroupRoleLabel] = domain.CorrelationRoleCorrelated
+return r.Patch(ctx, rjob, client.MergeFrom(rjobCopy2))
+```
+
+The `transitionSuppressed` signature:
+```go
+func (r *RemediationJobReconciler) transitionSuppressed(
+    ctx context.Context,
+    rjob *v1alpha1.RemediationJob,
+    groupID string,
+    primaryUID types.UID,
+) error
+```
+
+The call site in the window hold logic passes `group.PrimaryUID`:
+```go
+if !isPrimary {
+    return ctrl.Result{}, r.transitionSuppressed(ctx, &rjob, group.GroupID, group.PrimaryUID)
+}
+```
+
+### `dispatch` helper
+
+The window hold pseudocode calls `r.dispatch(ctx, &rjob, group.AllFindings)` and
+`r.dispatch(ctx, &rjob, nil)`. This private helper wraps the existing step 5+6 job
+creation logic at `remediationjob_controller.go:157` and accepts the correlated findings
+slice from STORY_03's updated `Build` signature:
+
+```go
+func (r *RemediationJobReconciler) dispatch(
+    ctx context.Context,
+    rjob *v1alpha1.RemediationJob,
+    correlatedFindings []v1alpha1.FindingSpec,
+) error {
+    job, err := r.JobBuilder.Build(rjob, correlatedFindings)
+    if err != nil {
+        return fmt.Errorf("building Job: %w", err)
+    }
+    if err := r.Create(ctx, job); err != nil {
+        if apierrors.IsAlreadyExists(err) {
+            // existing AlreadyExists handling (re-fetch + sync status) — unchanged
+            return nil
+        }
+        return fmt.Errorf("creating Job: %w", err)
+    }
+    // step 7: patch status to Dispatched — existing logic unchanged
+    return nil
+}
+```
+
+**Implementation order:** STORY_03 must be completed before or alongside STORY_02 because
+`dispatch` calls `r.JobBuilder.Build(rjob, correlatedFindings)`, which requires the
+two-argument `Build` signature introduced in STORY_03. During the STORY_03 transition,
+the existing inline job creation at `remediationjob_controller.go:157` is changed to call
+`r.JobBuilder.Build(&rjob, nil)` as a placeholder. When STORY_02 is implemented, the
+inline creation is replaced by `r.dispatch(ctx, &rjob, correlatedFindings)`.
+**Do not leave both the inline creation and the `dispatch` helper active** — the helper
+is the only call site after STORY_02 is merged.
 
 ### Wiring the `Correlator` in `cmd/watcher/main.go` (Gap 12 fix)
 
@@ -233,11 +333,28 @@ truth and avoids the reconciler needing to know about the config field name.
 - [ ] Add `Correlator *correlator.Correlator` field to `RemediationJobReconciler` struct
 - [ ] Update `Reconcile()` with window hold, `pendingPeers` helper, and correlator call
       (placed after the phase switch, before step 3 — use `r.Correlator != nil` guard)
-- [ ] Implement `transitionSuppressed` helper (status patch + label patch)
+- [ ] Implement `transitionSuppressed` helper (status patch with `CorrelationGroupID` +
+      `ConditionCorrelationSuppressed` condition + separate label patch)
+- [ ] Add `ConditionCorrelationSuppressed = "CorrelationSuppressed"` constant to
+      `api/v1alpha1/remediationjob_types.go` alongside the existing condition constants
 - [ ] Add conditional `Correlator` construction in `cmd/watcher/main.go` with
       `if !cfg.DisableCorrelation { ... }` block
 - [ ] Add `CorrelationWindowSeconds int`, `DisableCorrelation bool`, and `MultiPodThreshold int`
       (default: 3) to `config.Config` and `config.FromEnv()` in `internal/config/config.go`
+- [ ] Add the three new env vars to `deploy/kustomize/deployment-watcher.yaml` as commented-out
+      entries (so operators can see the knobs without them being active by default):
+      ```yaml
+      # Correlation window — how long to hold Pending jobs before dispatching (default: 30s)
+      # - name: CORRELATION_WINDOW_SECONDS
+      #   value: "30"
+      # Disable correlation entirely and dispatch immediately (default: false)
+      # - name: DISABLE_CORRELATION
+      #   value: "false"
+      # Minimum pod count on same node to trigger MultiPodSameNodeRule (default: 3)
+      # - name: CORRELATION_MULTI_POD_THRESHOLD
+      #   value: "3"
+      ```
+      Add these after the existing commented-out `STABILISATION_WINDOW_SECONDS` entry.
 - [ ] Run `go test -timeout 30s -race ./...` — must pass
 
 ---

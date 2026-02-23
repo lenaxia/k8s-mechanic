@@ -74,7 +74,13 @@ result, err := rec.Reconcile(ctx, ctrlReq(rjob1.Name, rjob1.Namespace))
 require.NoError(t, err)
 require.Greater(t, result.RequeueAfter, time.Duration(0))
 
-// Wait for the window to elapse
+// Wait for the window to elapse.
+// A 1.1× sleep (110ms over a 1s window) provides enough margin for CI scheduling
+// jitter without making the test suite slow. This is the accepted trade-off:
+// a deterministic fake clock would require injecting a clock interface into the
+// reconciler, which adds significant complexity for marginal gain given the 1s
+// window and the 100ms margin. If this test flakes on a heavily loaded CI runner,
+// raise the margin to 1.5× (1500ms) or inject a fakeclock.
 time.Sleep(1100 * time.Millisecond) // 10% over the 1s window
 
 // Second call: window elapsed → correlator runs
@@ -126,6 +132,11 @@ Remove the task "Add `Suppressed` to the non-failed phase check in
 - [ ] Extend `internal/controller/suite_test.go` (or a new `correlation_integration_test.go`
       in the same package) with TC-01 through TC-05, using the two-call `Reconcile()` pattern
       (first call returns `RequeueAfter`, sleep 1.1s, second call triggers correlation)
+- [ ] Verify RBAC is covered: the `Correlator` calls `r.List` on `RemediationJob` objects in
+      `r.Cfg.AgentNamespace`. Confirm that `deploy/kustomize/clusterrole-watcher.yaml` already
+      includes `list` on `remediationjobs` — it does (verified in the existing ClusterRole rules).
+      No new RBAC changes are required. Add a comment in the integration test file noting that
+      the `pendingPeers` list call is covered by the existing `ClusterRole` grant.
 - [ ] Verify via test (no code change needed) that `SourceProviderReconciler` already skips
       `Suppressed`-phase jobs via the existing `!= PhaseFailed` check at `provider.go:248`;
       add a comment in the test explaining this

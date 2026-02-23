@@ -35,13 +35,17 @@ stateless — all state lives in the `RemediationJob` objects passed in.
 - [ ] `SameNamespaceParentRule.Evaluate` returns `Matched=true` when two `RemediationJob`
       objects share a namespace and one's `parentObject` is a prefix of the other's
 - [ ] `PVCPodRule.Evaluate` returns `Matched=true` when a PVC finding and a pod finding
-      share a namespace and the pod's volumes reference the PVC (requires one `client.Get`)
+      share a namespace and the pod's volumes reference the PVC (requires one `client.Get`).
+      The rule must handle both orientations: candidate=Pod (PVC in peers) and
+      candidate=PVC (Pod in peers). The PVC is always the primary.
 - [ ] `MultiPodSameNodeRule.Evaluate` returns `Matched=true` when `>= threshold` pod
       findings ran on the same node
 - [ ] `internal/correlator/rules_test.go` covers:
   - Happy path for each rule
   - No-match cases (different namespace, different parent prefix, pod count below threshold)
   - `PVCPodRule` with no matching volume reference
+  - `PVCPodRule` with candidate=Pod and PVC in peers (forward orientation)
+  - `PVCPodRule` with candidate=PVC and Pod in peers (reverse orientation) — both must match
   - `MultiPodSameNodeRule` at exactly threshold - 1 (no match) and threshold (match)
 - [ ] `go test -timeout 30s -race ./internal/correlator/...` passes
 
@@ -127,10 +131,28 @@ func (r PVCPodRule) Name() string { return "PVCPod" }
 ```
 
 Logic:
-1. Filter `peers` to find any `PVCProvider` findings in the same namespace
-2. For each such PVC peer, call `client.Get` for the candidate pod's current spec
-3. Check `pod.Spec.Volumes` for a `PersistentVolumeClaimVolumeSource` matching the PVC name
-4. If found: `Matched=true`, primary is the PVC finding
+1. Determine the roles: if `candidate.Spec.Finding.Kind == "PersistentVolumeClaim"`, the
+   candidate is the PVC and peers are searched for Pod findings. If
+   `candidate.Spec.Finding.Kind == "Pod"`, peers are searched for PVC findings. Handle
+   both orientations so the rule fires regardless of which job reaches the correlator first.
+2. **candidate = Pod orientation:**
+   Filter `peers` for findings where `peer.Spec.Finding.Kind == "PersistentVolumeClaim"`
+   and `peer.Spec.Finding.Namespace == candidate.Spec.Finding.Namespace`.
+   For each PVC peer, call `client.Get` to fetch the live Pod object using
+   `candidate.Spec.Finding.Namespace` + `candidate.Spec.Finding.Name` as the key.
+   Iterate `pod.Spec.Volumes`: if any volume has a `PersistentVolumeClaimVolumeSource`
+   whose `ClaimName` equals the PVC peer's `Spec.Finding.Name`, the rule matches.
+   Primary is the PVC finding (the PVC peer).
+3. **candidate = PVC orientation:**
+   Filter `peers` for findings where `peer.Spec.Finding.Kind == "Pod"`
+   and `peer.Spec.Finding.Namespace == candidate.Spec.Finding.Namespace`.
+   For each Pod peer, call `client.Get` to fetch the live Pod object using
+   `peer.Spec.Finding.Namespace` + `peer.Spec.Finding.Name` as the key.
+   Iterate `pod.Spec.Volumes`: if any volume has a `PersistentVolumeClaimVolumeSource`
+   whose `ClaimName` equals `candidate.Spec.Finding.Name` (the candidate PVC), the rule
+   matches. Primary is the candidate (the PVC finding).
+4. If `client.Get` fails (pod gone), skip that peer — non-fatal miss.
+5. If neither orientation finds a match: `Matched=false, nil`.
 
 ### `MultiPodSameNodeRule`
 

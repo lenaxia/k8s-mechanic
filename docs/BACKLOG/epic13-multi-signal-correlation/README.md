@@ -93,8 +93,9 @@ a live API call during correlation evaluation.
 
 ### Rule 3 — MultiPodSameNodeRule
 
-**Trigger:** More than 3 pod findings all ran on the same node within the correlation
-window.
+**Trigger:** Three or more pod findings all ran on the same node within the correlation
+window. The threshold is `>= CORRELATION_MULTI_POD_THRESHOLD` (default: 3, so 3 pods on
+the same node triggers the rule).
 
 **Rationale:** If 4+ pods on `node-abc` are all failing simultaneously, the node is the
 root cause, not the individual pods. This ties into the FT-A4 cascade check, but operates
@@ -106,6 +107,7 @@ but as a single agent with full group context.
 become the correlated context.
 
 **Threshold:** Configurable via `CORRELATION_MULTI_POD_THRESHOLD` env var (default: 3).
+The rule fires when the count of pod findings on a single node is `>= threshold`.
 
 ## CorrelationWindow Behaviour
 

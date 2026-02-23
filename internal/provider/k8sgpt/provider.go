@@ -1,11 +1,8 @@
 package k8sgpt
 
 import (
-	"bytes"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"sort"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -60,45 +57,4 @@ func (p *K8sGPTProvider) ExtractFinding(obj client.Object) (*domain.Finding, err
 			Namespace:  result.Namespace,
 		},
 	}, nil
-}
-
-// Fingerprint computes the deduplication key for the given Finding.
-// Re-parses error texts from the pre-serialised JSON in f.Errors, sorts them,
-// then hashes namespace + kind + parentObject + sorted texts using SetEscapeHTML(false).
-// Returns an error if the payload cannot be JSON-encoded (extremely unlikely in practice).
-func (p *K8sGPTProvider) Fingerprint(f *domain.Finding) (string, error) {
-	var failures []struct {
-		Text string `json:"text"`
-	}
-	if f.Errors != "" {
-		if err := json.Unmarshal([]byte(f.Errors), &failures); err != nil {
-			return "", fmt.Errorf("K8sGPTProvider.Fingerprint: malformed errors JSON: %w", err)
-		}
-	}
-
-	texts := make([]string, 0, len(failures))
-	for _, fv := range failures {
-		texts = append(texts, fv.Text)
-	}
-	sort.Strings(texts)
-
-	payload := struct {
-		Namespace    string   `json:"namespace"`
-		Kind         string   `json:"kind"`
-		ParentObject string   `json:"parentObject"`
-		ErrorTexts   []string `json:"errorTexts"`
-	}{
-		Namespace:    f.Namespace,
-		Kind:         f.Kind,
-		ParentObject: f.ParentObject,
-		ErrorTexts:   texts,
-	}
-
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
-	if err := enc.Encode(payload); err != nil {
-		return "", fmt.Errorf("K8sGPTProvider.Fingerprint: json.Encode failed: %w", err)
-	}
-	return fmt.Sprintf("%x", sha256.Sum256(buf.Bytes())), nil
 }

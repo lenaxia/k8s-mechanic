@@ -2,7 +2,6 @@ package provider_test
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -24,8 +23,6 @@ type fakeSourceProvider struct {
 	objectType client.Object
 	finding    *domain.Finding
 	findErr    error
-	fp         string
-	fpErr      error
 }
 
 func (f *fakeSourceProvider) ProviderName() string      { return f.name }
@@ -33,7 +30,6 @@ func (f *fakeSourceProvider) ObjectType() client.Object { return f.objectType }
 func (f *fakeSourceProvider) ExtractFinding(_ client.Object) (*domain.Finding, error) {
 	return f.finding, f.findErr
 }
-func (f *fakeSourceProvider) Fingerprint(_ *domain.Finding) (string, error) { return f.fp, f.fpErr }
 
 var _ domain.SourceProvider = (*fakeSourceProvider)(nil)
 
@@ -88,13 +84,11 @@ func TestSourceProviderReconciler_CallsExtractFinding(t *testing.T) {
 		objectType: &v1alpha1.Result{},
 		findErr:    nil,
 	}
-	// Override to track calls
 	p.finding = nil // nil finding → skip, but still calls ExtractFinding
 
 	obj := makeWatchedObject("r1", "default")
 	c := newTestClient(obj)
 
-	// Use a custom provider that records calls
 	trackingProvider := &trackingFakeProvider{inner: p}
 	r := &provider.SourceProviderReconciler{
 		Client:   c,
@@ -124,9 +118,8 @@ func (t *trackingFakeProvider) ExtractFinding(obj client.Object) (*domain.Findin
 	t.extractCalled = true
 	return t.inner.ExtractFinding(obj)
 }
-func (t *trackingFakeProvider) Fingerprint(f *domain.Finding) (string, error) {
-	return t.inner.fp, nil
-}
+
+var _ domain.SourceProvider = (*trackingFakeProvider)(nil)
 
 // TestSourceProviderReconciler_SkipsOnNilFinding verifies no RemediationJob is created when
 // ExtractFinding returns nil, nil.
@@ -156,28 +149,32 @@ func TestSourceProviderReconciler_SkipsOnNilFinding(t *testing.T) {
 }
 
 // TestSourceProviderReconciler_CreatesRemediationJob verifies a RemediationJob is created
-// with correct fields for a valid finding.
+// with correct fields for a valid finding. The fingerprint is computed by domain.FindingFingerprint.
 func TestSourceProviderReconciler_CreatesRemediationJob(t *testing.T) {
-	const fp = "aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899"
+	finding := &domain.Finding{
+		Kind:         "Pod",
+		Name:         "pod-abc",
+		Namespace:    "default",
+		ParentObject: "my-deploy",
+		Errors:       `[{"text":"CrashLoopBackOff"}]`,
+		Details:      "Pod is crash looping",
+	}
+	expectedFP, err := domain.FindingFingerprint(finding)
+	if err != nil {
+		t.Fatalf("computing expected fingerprint: %v", err)
+	}
+
 	p := &fakeSourceProvider{
 		name:       "k8sgpt",
 		objectType: &v1alpha1.Result{},
-		finding: &domain.Finding{
-			Kind:         "Pod",
-			Name:         "pod-abc",
-			Namespace:    "default",
-			ParentObject: "my-deploy",
-			Errors:       `[{"text":"CrashLoopBackOff"}]`,
-			Details:      "Pod is crash looping",
-		},
-		fp: fp,
+		finding:    finding,
 	}
 
 	obj := makeWatchedObject("r1", "default")
 	c := newTestClient(obj)
 	r := newTestReconciler(p, c)
 
-	_, err := r.Reconcile(context.Background(), reqFor("r1", "default"))
+	_, err = r.Reconcile(context.Background(), reqFor("r1", "default"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -191,12 +188,12 @@ func TestSourceProviderReconciler_CreatesRemediationJob(t *testing.T) {
 	}
 
 	rjob := list.Items[0]
-	expectedName := "mendabot-" + fp[:12]
+	expectedName := "mendabot-" + expectedFP[:12]
 	if rjob.Name != expectedName {
 		t.Errorf("name = %q, want %q", rjob.Name, expectedName)
 	}
-	if rjob.Spec.Fingerprint != fp {
-		t.Errorf("fingerprint = %q, want %q", rjob.Spec.Fingerprint, fp)
+	if rjob.Spec.Fingerprint != expectedFP {
+		t.Errorf("fingerprint = %q, want %q", rjob.Spec.Fingerprint, expectedFP)
 	}
 	if rjob.Spec.SourceType != "k8sgpt" {
 		t.Errorf("sourceType = %q, want %q", rjob.Spec.SourceType, "k8sgpt")
@@ -207,11 +204,11 @@ func TestSourceProviderReconciler_CreatesRemediationJob(t *testing.T) {
 	if rjob.Spec.SourceResultRef.Namespace != "default" {
 		t.Errorf("sourceResultRef.Namespace = %q, want %q", rjob.Spec.SourceResultRef.Namespace, "default")
 	}
-	if rjob.Labels["remediation.mendabot.io/fingerprint"] != fp[:12] {
-		t.Errorf("fingerprint label = %q, want %q", rjob.Labels["remediation.mendabot.io/fingerprint"], fp[:12])
+	if rjob.Labels["remediation.mendabot.io/fingerprint"] != expectedFP[:12] {
+		t.Errorf("fingerprint label = %q, want %q", rjob.Labels["remediation.mendabot.io/fingerprint"], expectedFP[:12])
 	}
-	if rjob.Annotations["remediation.mendabot.io/fingerprint-full"] != fp {
-		t.Errorf("fingerprint-full annotation = %q, want %q", rjob.Annotations["remediation.mendabot.io/fingerprint-full"], fp)
+	if rjob.Annotations["remediation.mendabot.io/fingerprint-full"] != expectedFP {
+		t.Errorf("fingerprint-full annotation = %q, want %q", rjob.Annotations["remediation.mendabot.io/fingerprint-full"], expectedFP)
 	}
 	if rjob.Spec.Finding.Kind != "Pod" {
 		t.Errorf("finding.kind = %q, want %q", rjob.Spec.Finding.Kind, "Pod")
@@ -221,15 +218,19 @@ func TestSourceProviderReconciler_CreatesRemediationJob(t *testing.T) {
 // TestSourceProviderReconciler_SkipsDuplicateFingerprint verifies no second RemediationJob is
 // created when a non-Failed one with the same fingerprint already exists.
 func TestSourceProviderReconciler_SkipsDuplicateFingerprint(t *testing.T) {
-	const fp = "aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899"
+	finding := &domain.Finding{
+		Kind: "Pod", Namespace: "default", ParentObject: "my-deploy",
+		Errors: `[{"text":"error"}]`,
+	}
+	fp, err := domain.FindingFingerprint(finding)
+	if err != nil {
+		t.Fatalf("computing fingerprint: %v", err)
+	}
+
 	p := &fakeSourceProvider{
 		name:       "k8sgpt",
 		objectType: &v1alpha1.Result{},
-		finding: &domain.Finding{
-			Kind: "Pod", Namespace: "default", ParentObject: "my-deploy",
-			Errors: `[{"text":"error"}]`,
-		},
-		fp: fp,
+		finding:    finding,
 	}
 
 	existing := &v1alpha1.RemediationJob{
@@ -248,7 +249,7 @@ func TestSourceProviderReconciler_SkipsDuplicateFingerprint(t *testing.T) {
 	c := newTestClient(obj, existing)
 	r := newTestReconciler(p, c)
 
-	_, err := r.Reconcile(context.Background(), reqFor("r1", "default"))
+	_, err = r.Reconcile(context.Background(), reqFor("r1", "default"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -266,15 +267,19 @@ func TestSourceProviderReconciler_SkipsDuplicateFingerprint(t *testing.T) {
 // is created when the existing one has phase Failed. The Failed one is deleted first, then a
 // new one with the standard name is created.
 func TestSourceProviderReconciler_ReDispatchesFailedRemediationJob(t *testing.T) {
-	const fp = "aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899"
+	finding := &domain.Finding{
+		Kind: "Pod", Namespace: "default", ParentObject: "my-deploy",
+		Errors: `[{"text":"error"}]`,
+	}
+	fp, err := domain.FindingFingerprint(finding)
+	if err != nil {
+		t.Fatalf("computing fingerprint: %v", err)
+	}
+
 	p := &fakeSourceProvider{
 		name:       "k8sgpt",
 		objectType: &v1alpha1.Result{},
-		finding: &domain.Finding{
-			Kind: "Pod", Namespace: "default", ParentObject: "my-deploy",
-			Errors: `[{"text":"error"}]`,
-		},
-		fp: fp,
+		finding:    finding,
 	}
 
 	// Existing Failed RemediationJob with same fingerprint and standard name.
@@ -310,7 +315,7 @@ func TestSourceProviderReconciler_ReDispatchesFailedRemediationJob(t *testing.T)
 	c := newTestClient(obj, failedRJob)
 	r := newTestReconciler(p, c)
 
-	_, err := r.Reconcile(context.Background(), reqFor("r1", "default"))
+	_, err = r.Reconcile(context.Background(), reqFor("r1", "default"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -437,18 +442,17 @@ func TestSourceProviderReconciler_NotFound_DeletesRunningRJobs(t *testing.T) {
 	}
 }
 
-// TestSourceProviderReconciler_FingerprintError_ReturnsError verifies that a Fingerprint
-// error is propagated as a reconciler error.
+// TestSourceProviderReconciler_FingerprintError_ReturnsError verifies that a malformed
+// Errors JSON in the finding causes domain.FindingFingerprint to return an error which
+// is propagated as a reconciler error.
 func TestSourceProviderReconciler_FingerprintError_ReturnsError(t *testing.T) {
-	fpErr := fmt.Errorf("hash write failed")
 	p := &fakeSourceProvider{
 		name:       "k8sgpt",
 		objectType: &v1alpha1.Result{},
 		finding: &domain.Finding{
 			Kind: "Pod", Namespace: "default", ParentObject: "my-deploy",
-			Errors: `[{"text":"error"}]`,
+			Errors: "not-json",
 		},
-		fpErr: fpErr,
 	}
 
 	obj := makeWatchedObject("r1", "default")
@@ -457,6 +461,6 @@ func TestSourceProviderReconciler_FingerprintError_ReturnsError(t *testing.T) {
 
 	_, err := r.Reconcile(context.Background(), reqFor("r1", "default"))
 	if err == nil {
-		t.Error("expected error from Fingerprint failure, got nil")
+		t.Error("expected error from malformed Errors JSON, got nil")
 	}
 }

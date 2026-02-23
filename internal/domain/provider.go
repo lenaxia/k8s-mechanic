@@ -67,7 +67,8 @@ func FindingFingerprint(f *Finding) (string, error) {
 //
 // The SourceProvider does NOT create RemediationJob objects directly — that is the
 // responsibility of SourceProviderReconciler, which calls ExtractFinding() and owns
-// the creation logic.
+// the creation logic. Fingerprinting is performed by domain.FindingFingerprint, which
+// is a pure function and not provider-specific.
 type SourceProvider interface {
 	// ProviderName returns a stable, lowercase identifier for this provider.
 	// Used as the value of RemediationJobSpec.SourceType (e.g. "k8sgpt", "prometheus").
@@ -82,11 +83,6 @@ type SourceProvider interface {
 	// Returns (nil, nil) if the object should be skipped (e.g. no errors present).
 	// Returns (nil, err) for transient errors that should trigger a requeue.
 	ExtractFinding(obj client.Object) (*Finding, error)
-
-	// Fingerprint computes the deduplication key for the given Finding.
-	// Must be deterministic: same logical finding always produces the same fingerprint.
-	// Returns an error if the finding's error payload cannot be serialised.
-	Fingerprint(f *Finding) (string, error)
 }
 
 // Finding is the provider-agnostic representation of a cluster problem.

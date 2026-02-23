@@ -18,7 +18,7 @@ import (
 )
 
 // SourceProviderReconciler is a controller-runtime Reconciler that wraps a SourceProvider.
-// It handles fetch, skip-if-not-found, ExtractFinding, Fingerprint, dedup-by-CRD, and
+// It handles fetch, skip-if-not-found, ExtractFinding, dedup-by-CRD, and
 // RemediationJob creation. Source-specific logic is entirely in the SourceProvider.
 type SourceProviderReconciler struct {
 	client.Client
@@ -79,7 +79,7 @@ func (r *SourceProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, nil
 	}
 
-	fp, err := r.Provider.Fingerprint(finding)
+	fp, err := domain.FindingFingerprint(finding)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("computing fingerprint: %w", err)
 	}

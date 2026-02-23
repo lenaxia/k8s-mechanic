@@ -41,3 +41,4 @@ else.
 | [0019](0019_2026-02-22_epic09-design.md) | 2026-02-22 | Epic 09: native provider design, backlog stories 01–09 created | Complete |
 | [0020](0020_2026-02-22_epic09-backlog-review.md) | 2026-02-22 | Epic 09: stories 10–12 added; 9 integration gaps found and fixed | Complete |
 | [0021](0021_2026-02-22_epic09-finding-fixes.md) | 2026-02-22 | Epic 09: all 24 skeptical reviewer findings applied across 12 story files | Complete |
+| [0022](0022_2026-02-22_epic09-story02-slim-interface.md) | 2026-02-22 | Epic 09 STORY_02: slim SourceProvider interface, reconciler calls domain.FindingFingerprint | Complete |

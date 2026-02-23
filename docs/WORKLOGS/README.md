@@ -43,3 +43,4 @@ else.
 | [0021](0021_2026-02-22_epic09-finding-fixes.md) | 2026-02-22 | Epic 09: all 24 skeptical reviewer findings applied across 12 story files | Complete |
 | [0022](0022_2026-02-22_epic09-story02-slim-interface.md) | 2026-02-22 | Epic 09 STORY_02: slim SourceProvider interface, reconciler calls domain.FindingFingerprint | Complete |
 | [0023](0023_2026-02-22_epic09-story03-parent-traversal.md) | 2026-02-22 | Epic 09 STORY_03: getParent owner-reference traversal, 9 tests, fake client | Complete |
+| [0024](0024_2026-02-22_epic09-story04-pod-provider.md) | 2026-02-22 | Epic 09 STORY_04: PodProvider with failure detection, 16 tests | Complete |

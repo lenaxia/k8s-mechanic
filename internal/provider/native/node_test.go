@@ -463,6 +463,32 @@ func TestNodeProvider_FindingErrors_IsValidJSON(t *testing.T) {
 	}
 }
 
+// TestNodeProvider_NonStandardConditionTrue_Detected: a vendor/custom condition (GPUFailure=True)
+// not in the standard switch must produce a finding containing "GPUFailure".
+func TestNodeProvider_NonStandardConditionTrue_Detected(t *testing.T) {
+	s := newTestScheme()
+	c := fake.NewClientBuilder().WithScheme(s).Build()
+	p := NewNodeProvider(c)
+
+	node := healthyNode("node-gpu")
+	node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
+		Type:    "GPUFailure",
+		Status:  corev1.ConditionTrue,
+		Reason:  "GPUMemoryFailure",
+		Message: "GPU memory failure",
+	})
+
+	finding, err := p.ExtractFinding(node)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if finding == nil {
+		t.Fatal("expected finding for non-standard GPUFailure=True condition, got nil")
+	}
+	assertNodeErrorsJSON(t, finding.Errors)
+	assertNodeErrorTextContains(t, finding.Errors, "GPUFailure")
+}
+
 // assertNodeErrorsJSON verifies that the errors string is valid JSON with at least one entry.
 func assertNodeErrorsJSON(t *testing.T, errors string) {
 	t.Helper()

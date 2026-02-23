@@ -1,7 +1,11 @@
 package domain_test
 
 import (
-	"strings"
+	"bytes"
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
+	"sort"
 	"testing"
 
 	"github.com/lenaxia/k8s-mendabot/internal/domain"
@@ -224,18 +228,63 @@ func TestFindingFingerprint(t *testing.T) {
 
 	t.Run("HTMLCharacters", func(t *testing.T) {
 		f := &domain.Finding{
-			Kind: "Pod", Namespace: "default", ParentObject: "Deployment/my-app",
-			Errors: `[{"text":"error: <html> & more > less"}]`,
+			Kind:         "Pod",
+			Namespace:    "default",
+			ParentObject: "Deployment/my-app",
+			Errors:       `[{"text":"error: <html> & more > less"}]`,
 		}
-		fp, err := domain.FindingFingerprint(f)
+
+		actualFP, err := domain.FindingFingerprint(f)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if strings.Contains(fp, `\u003c`) || strings.Contains(fp, `\u003e`) || strings.Contains(fp, `\u0026`) {
-			t.Errorf("HTML escape sequences must not appear in fingerprint: %q", fp)
+		if actualFP == "" {
+			t.Fatal("fingerprint must not be empty")
 		}
-		if fp == "" {
-			t.Errorf("fingerprint must not be empty")
+
+		// Helper: fingerprint using the same payload struct as FindingFingerprint,
+		// but with escapeHTML toggled.
+		fingerprintWith := func(escapeHTML bool) string {
+			var failures []struct {
+				Text string `json:"text"`
+			}
+			_ = json.Unmarshal([]byte(f.Errors), &failures)
+			texts := make([]string, 0, len(failures))
+			for _, fv := range failures {
+				texts = append(texts, fv.Text)
+			}
+			sort.Strings(texts)
+
+			payload := struct {
+				Namespace    string   `json:"namespace"`
+				Kind         string   `json:"kind"`
+				ParentObject string   `json:"parentObject"`
+				ErrorTexts   []string `json:"errorTexts"`
+			}{
+				Namespace:    f.Namespace,
+				Kind:         f.Kind,
+				ParentObject: f.ParentObject,
+				ErrorTexts:   texts,
+			}
+
+			var buf bytes.Buffer
+			enc := json.NewEncoder(&buf)
+			enc.SetEscapeHTML(escapeHTML)
+			_ = enc.Encode(payload)
+			return fmt.Sprintf("%x", sha256.Sum256(buf.Bytes()))
+		}
+
+		// The actual fingerprint must match what you get with SetEscapeHTML(false).
+		expectedNoEscape := fingerprintWith(false)
+		if actualFP != expectedNoEscape {
+			t.Errorf("FindingFingerprint does not match SetEscapeHTML(false) encoding:\n  got  %q\n  want %q", actualFP, expectedNoEscape)
+		}
+
+		// The HTML-escaped encoding must produce a DIFFERENT fingerprint,
+		// proving SetEscapeHTML(false) is load-bearing.
+		escapedFP := fingerprintWith(true)
+		if actualFP == escapedFP {
+			t.Errorf("SetEscapeHTML(true) produced same fingerprint as SetEscapeHTML(false) — HTML characters in error text must cause a difference")
 		}
 	})
 

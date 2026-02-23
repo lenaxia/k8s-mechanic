@@ -379,7 +379,47 @@ func TestDeploymentParentObject_IsSelf(t *testing.T) {
 	}
 }
 
-// TestBothConditions_TwoEntries: replica mismatch AND Available=False both present
+// TestDeploymentProvider_AvailableFalse_WhileScalingDown: spec.replicas=2, status.replicas=3,
+// status.readyReplicas=2 (scale-down transient), AND Available=False → finding returned.
+// Available=False must be reported even when the replica mismatch check is skipped.
+func TestDeploymentProvider_AvailableFalse_WhileScalingDown(t *testing.T) {
+	s := newTestScheme()
+	c := fake.NewClientBuilder().WithScheme(s).Build()
+	p := NewDeploymentProvider(c)
+
+	deploy := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "scaling-deploy",
+			Namespace: "default",
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: int32Ptr(2),
+		},
+		Status: appsv1.DeploymentStatus{
+			Replicas:      3, // status.replicas > spec.replicas → scale-down transient
+			ReadyReplicas: 2,
+			Conditions: []appsv1.DeploymentCondition{
+				{
+					Type:    appsv1.DeploymentAvailable,
+					Status:  corev1.ConditionFalse,
+					Reason:  "MinimumReplicasUnavailable",
+					Message: "Deployment does not have minimum availability.",
+				},
+			},
+		},
+	}
+
+	finding, err := p.ExtractFinding(deploy)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if finding == nil {
+		t.Fatal("expected finding: Available=False must be reported even during scale-down transient, got nil")
+	}
+	assertErrorsJSON(t, finding.Errors)
+	assertErrorTextContains(t, finding.Errors, "Available")
+}
+
 // → Errors JSON contains two entries.
 func TestBothConditions_TwoEntries(t *testing.T) {
 	s := newTestScheme()

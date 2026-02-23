@@ -76,6 +76,12 @@ func (n *nodeProvider) ExtractFinding(obj client.Object) (*domain.Finding, error
 			if cond.Status == corev1.ConditionTrue {
 				errors = append(errors, errorEntry{Text: buildNodeConditionText(node.Name, cond)})
 			}
+		default:
+			if cond.Status == corev1.ConditionTrue {
+				if _, ignored := ignoredNodeConditions[cond.Type]; !ignored {
+					errors = append(errors, errorEntry{Text: buildNodeConditionText(node.Name, cond)})
+				}
+			}
 		}
 	}
 

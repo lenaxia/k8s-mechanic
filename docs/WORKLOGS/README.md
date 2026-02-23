@@ -45,3 +45,4 @@ else.
 | [0023](0023_2026-02-22_epic09-story03-parent-traversal.md) | 2026-02-22 | Epic 09 STORY_03: getParent owner-reference traversal, 9 tests, fake client | Complete |
 | [0024](0024_2026-02-22_epic09-story04-pod-provider.md) | 2026-02-22 | Epic 09 STORY_04: PodProvider with failure detection, 16 tests | Complete |
 | [0025](0025_2026-02-22_epic09-story05-deployment-provider.md) | 2026-02-22 | Epic 09 STORY_05: DeploymentProvider with replicas/available detection, 13 tests | Complete |
+| [0026](0026_2026-02-22_epic09-story06-pvc-provider.md) | 2026-02-22 | Epic 09 STORY_06: PVCProvider with ProvisioningFailed event detection, 11 tests | Complete |

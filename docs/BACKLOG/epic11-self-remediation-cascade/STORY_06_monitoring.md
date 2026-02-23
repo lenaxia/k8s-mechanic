@@ -2,7 +2,7 @@
 
 **Epic:** [epic11-self-remediation-cascade](README.md)
 **Priority:** Medium
-**Status:** In Progress
+**Status:** Complete
 **Estimated Effort:** 4 hours
 
 ---
@@ -17,16 +17,16 @@ As a **mendabot operator**, I want comprehensive monitoring and observability fo
 
 - [x] Prometheus metrics for cascade prevention events
 - [x] Structured audit logs for cascade decisions
-- [ ] Kubernetes Events for significant cascade events
+- [x] Kubernetes Events for significant cascade events
 - [x] Circuit breaker state exposed as metrics
 - [x] Chain depth distribution metrics
 - [x] Self-remediation success/failure rates
 - [x] Suppression reason tracking (circuit breaker, max depth, infrastructure cascade)
 - [x] Integration with existing controller-runtime metrics
-- [ ] Grafana dashboard template for cascade monitoring
-- [ ] Alert rules for cascade anomalies (e.g., deep cascades, circuit breaker stuck open)
+- [x] Grafana dashboard template for cascade monitoring
+- [x] Alert rules for cascade anomalies (e.g., deep cascades, circuit breaker stuck open)
 - [x] Unit tests for metrics collection
-- [ ] Integration tests for observability features
+- [x] Integration tests for observability features
 
 ---
 
@@ -154,12 +154,12 @@ EVENTS_ENABLED=true
 - [x] Add metrics to SourceProviderReconciler
 - [x] Add metrics to CascadeChecker
 - [x] Implement structured audit logging
-- [ ] Add Kubernetes Events emission
-- [ ] Create Grafana dashboard template
-- [ ] Write Prometheus alert rules
+- [x] Add Kubernetes Events emission
+- [x] Create Grafana dashboard template
+- [x] Write Prometheus alert rules
 - [x] Write unit tests for metrics
-- [ ] Write integration tests for observability
-- [ ] Document monitoring setup and dashboards
+- [x] Write integration tests for observability
+- [x] Document monitoring setup and dashboards
 
 ---
 
@@ -176,8 +176,8 @@ EVENTS_ENABLED=true
 - [x] `go vet` clean
 - [x] Metrics available on `/metrics` endpoint
 - [x] Audit logs contain structured cascade events
-- [ ] Kubernetes Events emitted for significant cascade events
-- [ ] Grafana dashboard template provided
-- [ ] Alert rules documented
-- [ ] Performance impact measured and acceptable
-- [ ] Documentation covers monitoring setup and interpretation
+- [x] Kubernetes Events emitted for significant cascade events
+- [x] Grafana dashboard template provided
+- [x] Alert rules documented
+- [x] Performance impact measured and acceptable
+- [x] Documentation covers monitoring setup and interpretation

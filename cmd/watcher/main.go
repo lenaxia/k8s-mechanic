@@ -104,11 +104,12 @@ func main() {
 	}
 	for _, p := range enabledProviders {
 		if err := (&provider.SourceProviderReconciler{
-			Client:   mgr.GetClient(),
-			Scheme:   mgr.GetScheme(),
-			Log:      logger,
-			Cfg:      cfg,
-			Provider: p,
+			Client:        mgr.GetClient(),
+			Scheme:        mgr.GetScheme(),
+			Log:           logger,
+			Cfg:           cfg,
+			Provider:      p,
+			EventRecorder: mgr.GetEventRecorderFor("mendabot-watcher"),
 		}).SetupWithManager(mgr); err != nil {
 			logger.Fatal("provider setup failed", zap.Error(err))
 		}

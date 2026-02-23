@@ -447,8 +447,10 @@ func TestCircuitBreakerPersistenceAcrossRestarts(t *testing.T) {
 	if allowed1 != allowed2 {
 		t.Errorf("allowed mismatch: first=%v, second=%v", allowed1, allowed2)
 	}
-	// Allow for tiny differences due to time passing between calls
-	if (remaining1 - remaining2).Abs() > time.Millisecond {
+	// Allow for differences due to time passing between the two calls.
+	// Both instances read the same ConfigMap timestamp; remaining diverges only by
+	// the real elapsed time between the two ShouldAllow invocations.
+	if (remaining1 - remaining2).Abs() > 100*time.Millisecond {
 		t.Errorf("remaining mismatch: first=%v, second=%v (diff: %v)", remaining1, remaining2, remaining1-remaining2)
 	}
 

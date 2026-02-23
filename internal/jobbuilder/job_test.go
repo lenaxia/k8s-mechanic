@@ -586,6 +586,65 @@ func TestBuild_SecurityContexts(t *testing.T) {
 	}
 }
 
+func TestBuild_InitScript_UsesGitHubAppToken(t *testing.T) {
+	b, err := New(Config{AgentNamespace: "mendabot"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	job, err := b.Build(testRJob)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	var initContainer corev1.Container
+	for _, c := range job.Spec.Template.Spec.InitContainers {
+		if c.Name == "git-token-clone" {
+			initContainer = c
+			break
+		}
+	}
+
+	script := initContainer.Args[0]
+	if !contains(script, "get-github-app-token.sh") {
+		t.Error("init script should call get-github-app-token.sh")
+	}
+	if !contains(script, "x-access-token:${TOKEN}") {
+		t.Error("init script should use GitHub App token for authentication")
+	}
+}
+
+func TestBuild_InitScript_HasErrorHandling(t *testing.T) {
+	b, err := New(Config{AgentNamespace: "mendabot"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	job, err := b.Build(testRJob)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	var initContainer corev1.Container
+	for _, c := range job.Spec.Template.Spec.InitContainers {
+		if c.Name == "git-token-clone" {
+			initContainer = c
+			break
+		}
+	}
+
+	script := initContainer.Args[0]
+	if !contains(script, "ERROR: Failed to clone") {
+		t.Error("init script should have error handling for clone failures")
+	}
+	if !contains(script, "The GitHub App token does not have access to this repository") {
+		t.Error("init script should explain authentication failures")
+	}
+}
+
+func contains(s, substr string) bool {
+	return len(s) > 0 && len(substr) > 0 && len(s) >= len(substr) &&
+		(s == substr || len(s) > len(substr) && (s[:len(substr)] == substr || contains(s[1:], substr)))
+}
+
 func TestBuild_PodSecurityContext(t *testing.T) {
 	job := buildJob(t)
 	sc := job.Spec.Template.Spec.SecurityContext

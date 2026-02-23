@@ -48,7 +48,7 @@ a feature is approved for implementation:
 | FT-A1 | Namespace-scoped provider filtering | ★★★ | ● | Evaluated |
 | FT-A2 | Resource annotation opt-in/opt-out | ★★★ | ● | Evaluated |
 | FT-A3 | Severity tiers on findings | ★★ | ● | Evaluated |
-| FT-A4 | Cascading failure root-cause detection | ★★★ | ●●● | Evaluated |
+| FT-A4 | Cascading failure root-cause detection | ★★★ | ●●● | Planned (epic11) |
 | FT-A5 | Recurrence memory — reuse prior fix context | ★★★ | ●● | Evaluated |
 | FT-A6 | Multi-signal correlation (related findings) | ★★★ | ●●● | Evaluated |
 | FT-A7 | GitOps drift detection source provider | ★★★ | ●● | Evaluated |
@@ -350,6 +350,7 @@ extra scrutiny.
 | FT-R3 | GitHub App token expiry guard | ★★ | ● | Evaluated |
 | FT-R4 | Durable stabilisation window (restart-safe) | ★★ | ●● | Evaluated |
 | FT-R5 | Circuit breaker for LLM API failures | ★★ | ●● | Evaluated |
+| FT-R7 | Self-remediation cascade prevention | ★★★ | ●● | Complete (epic11) |
 | FT-R6 | RemediationJob admission webhook | ★ | ●●● | Deferred |
 
 ---
@@ -497,6 +498,32 @@ this time.
 **Complexity note:** Parsing Job exit codes reliably requires the agent to use
 distinct exit codes for different failure categories (LLM timeout vs. git failure vs.
 internal error). The entrypoint script needs to be updated to use structured exit codes.
+
+---
+
+### FT-R7 — Self-remediation cascade prevention
+
+**Problem:** When mendabot's own agent jobs fail, they trigger new investigations into why
+mendabot failed. These investigations can themselves fail, creating an infinite cascade
+that burns LLM quota and fills the namespace with failed Jobs.
+
+**Proposed solution:** A multi-layered cascade prevention system:
+
+1. **Self-remediation detection:** Identify mendabot agent jobs via label
+   `app.kubernetes.io/managed-by: mendabot-watcher`
+2. **Chain depth tracking:** Increment depth counter on each self-remediation level,
+   enforce configurable maximum depth (`SELF_REMEDIATION_MAX_DEPTH`)
+3. **Circuit breaker:** Persistent cooldown between self-remediations using ConfigMap
+   state (`SELF_REMEDIATION_COOLDOWN_SECONDS`)
+4. **Upstream routing:** Self-remediations at depth ≥ 2 target upstream mendabot
+   repository for bug reporting (`MENDABOT_UPSTREAM_REPO`)
+
+**Implementation status:** Complete in epic11. Includes:
+- Thread-safe circuit breaker with ConfigMap persistence
+- Atomic chain depth tracking via owner RemediationJob references
+- Backward compatibility with annotation-based depth fallback
+- Comprehensive test coverage including concurrent reconciliation scenarios
+- Configurable limits with safe defaults for production
 
 ---
 
@@ -1090,16 +1117,17 @@ product, the recommended implementation sequence (after epic09 is complete):
 |---|---|---|
 | 1 | FT-A1 | Namespace filtering eliminates the largest source of noise immediately |
 | 2 | FT-A9 | Mandatory validation prevents schema-invalid PRs — the most visible failure mode |
-| 3 | FT-R1 | Dead-letter queue prevents infinite retry loops that burn LLM quota |
-| 4 | FT-A2 | Annotation opt-out gives operators per-resource escape hatches |
-| 5 | FT-A3 | Severity tiers enable proportional response and MIN_SEVERITY filtering |
-| 6 | FT-S1 | Secret redaction closes an unambiguous security gap in native providers |
-| 7 | FT-U2 | Metrics make it possible to observe and tune accuracy objectively |
-| 8 | FT-A8 | Feedback annotations close the learning loop for persistent false positives |
-| 9 | FT-A4 | Cascade detection eliminates multi-Job noise from single root causes |
-| 10 | FT-A5 | Recurrence memory prevents redundant re-investigation of known failures |
-| 11 | FT-U8 | Dry-run mode enables safe evaluation on production clusters |
-| 12 | FT-P2 | cert-manager provider: high-value, low-complexity new signal source |
-| 13 | FT-I1 | PR auto-close prevents stale PR accumulation as volume grows |
-| 14 | FT-A6 | Multi-signal correlation (high value but complex; tackle after lower-hanging fruit) |
-| 15 | FT-P1 | Alertmanager provider: highest-value new source; tackle after core accuracy is solid |
+| 3 | FT-R7 | Self-remediation cascade prevention stops infinite mendabot failure loops |
+| 4 | FT-R1 | Dead-letter queue prevents infinite retry loops that burn LLM quota |
+| 5 | FT-A2 | Annotation opt-out gives operators per-resource escape hatches |
+| 6 | FT-A3 | Severity tiers enable proportional response and MIN_SEVERITY filtering |
+| 7 | FT-S1 | Secret redaction closes an unambiguous security gap in native providers |
+| 8 | FT-U2 | Metrics make it possible to observe and tune accuracy objectively |
+| 9 | FT-A8 | Feedback annotations close the learning loop for persistent false positives |
+| 10 | FT-A4 | Cascade detection eliminates multi-Job noise from single root causes |
+| 11 | FT-A5 | Recurrence memory prevents redundant re-investigation of known failures |
+| 12 | FT-U8 | Dry-run mode enables safe evaluation on production clusters |
+| 13 | FT-P2 | cert-manager provider: high-value, low-complexity new signal source |
+| 14 | FT-I1 | PR auto-close prevents stale PR accumulation as volume grows |
+| 15 | FT-A6 | Multi-signal correlation (high value but complex; tackle after lower-hanging fruit) |
+| 16 | FT-P1 | Alertmanager provider: highest-value new source; tackle after core accuracy is solid |

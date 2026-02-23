@@ -4,8 +4,8 @@ metadata:
   name: mendabot-watcher
 rules:
 - apiGroups: [""]
-  resources: ["pods", "persistentvolumeclaims", "nodes", "namespaces", "events"]
-  verbs: ["get", "list", "watch"]
+  resources: ["pods", "persistentvolumeclaims", "nodes", "namespaces", "events", "configmaps"]
+  verbs: ["get", "list", "watch", "create", "update", "patch"]
 - apiGroups: ["apps"]
   resources: ["deployments", "statefulsets", "replicasets", "daemonsets"]
   verbs: ["get", "list", "watch"]

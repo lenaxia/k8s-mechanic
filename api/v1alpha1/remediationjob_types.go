@@ -123,10 +123,6 @@ type RemediationJobSpec struct {
 	// ChainDepth tracks how many levels deep this self-remediation chain is.
 	// 0 = not a self-remediation, 1 = mendabot job failed, 2 = analysis of why mendabot job failed, etc.
 	ChainDepth int `json:"chainDepth,omitempty"`
-
-	// TargetRepoOverride specifies an alternative repository for upstream contributions.
-	// If empty, defaults to GitOpsRepo for regular findings or MendabotUpstreamRepo for self-remediations.
-	TargetRepoOverride string `json:"targetRepoOverride,omitempty"`
 }
 
 // ResultRef is a back-reference to the source object that triggered a RemediationJob.

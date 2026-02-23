@@ -1,0 +1,71 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: mendabot-cascade-prevention
+  namespace: mendabot-system
+  labels:
+    app: mendabot
+    release: prometheus
+spec:
+  groups:
+  - name: mendabot-cascade-prevention.rules
+    rules:
+    - alert: HighCircuitBreakerActivationRate
+      expr: rate(mendabot_circuit_breaker_activations_total[5m]) > 0.1
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "High circuit breaker activation rate"
+        description: "Circuit breaker is activating frequently ({{ $value }} activations/min), indicating potential cascade issues"
+        
+    - alert: LowSelfRemediationSuccessRate
+      expr: mendabot_self_remediation_success_rate < 0.5
+      for: 10m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Low self-remediation success rate"
+        description: "Self-remediation success rate is below 50% (current: {{ $value }})"
+        
+    - alert: DeepCascadeChains
+      expr: histogram_quantile(0.95, sum(rate(mendabot_chain_depth_distribution_bucket[5m])) by (le)) > 5
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Deep cascade chains detected"
+        description: "95th percentile of chain depth exceeds 5 (current: {{ $value }})"
+        
+    - alert: FrequentCascadeSuppressions
+      expr: sum(rate(mendabot_cascade_suppressions_total[5m])) > 0.2
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Frequent cascade suppressions"
+        description: "Cascade suppression rate is high ({{ $value }} suppressions/min)"
+        
+    - alert: CircuitBreakerCooldownActive
+      expr: mendabot_circuit_breaker_cooldown_seconds > 0
+      for: 1m
+      labels:
+        severity: info
+      annotations:
+        summary: "Circuit breaker cooldown active"
+        description: "Circuit breaker cooldown is active with {{ $value }} seconds remaining"
+        
+    - record: mendabot:cascade_suppression_ratio
+      expr: |
+        sum(rate(mendabot_cascade_suppressions_total[5m]))
+        /
+        sum(rate(mendabot_self_remediation_attempts_total[5m]))
+        
+    - record: mendabot:circuit_breaker_activation_rate
+      expr: rate(mendabot_circuit_breaker_activations_total[5m])
+      
+    - record: mendabot:self_remediation_attempt_rate
+      expr: rate(mendabot_self_remediation_attempts_total[5m])
+      
+    - record: mendabot:chain_depth_p95
+      expr: histogram_quantile(0.95, sum(rate(mendabot_chain_depth_distribution_bucket[5m])) by (le))

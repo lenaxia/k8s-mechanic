@@ -54,3 +54,4 @@ else.
 | [0032](0032_2026-02-22_epic09-story09-remove-k8sgpt.md) | 2026-02-22 | Epic 09 STORY_09: remove k8sgpt provider, result_types, migrate 6 integration tests | Complete |
 | [0033](0033_2026-02-22_epic09-native-provider-complete.md) | 2026-02-22 | Epic 09 complete: all 12 stories, 6 native providers, k8sgpt removed, code review 0 gaps | Complete |
 | [0034](0034_2026-02-23_epic09-merge-and-release.md) | 2026-02-23 | Epic 09 merge: skeptical review, 5 gaps fixed, merge-readiness blockers resolved, v0.3.0 tagged | Complete |
+| [0035](0035_2026-02-23_cascade-prevention-complete.md) | 2026-02-23 | Comprehensive cascade prevention system: circuit breaker, chain depth tracking, cascade checker, metrics, integration | Complete |

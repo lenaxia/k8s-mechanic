@@ -41,8 +41,7 @@ and the GitOps repository, then opens a pull request with a proposed fix.
 1. `mendabot-watcher` — Go controller binary (controller-runtime)
 2. `mendabot-agent` — Docker image (opencode + kubectl + helm + flux + gh)
 
-**Upstream target:** Once stable, contribute upstream as a standalone operator or as an
-integration with the broader Kubernetes observability ecosystem.
+**Note:** Upstream contribution feature has been removed due to GitHub App permission complexity. The system focuses on self-remediation cascade prevention without attempting upstream bug reporting.
 
 **Primary source documents:**
 - [`docs/DESIGN/HLD.md`](docs/DESIGN/HLD.md) — Authoritative specification

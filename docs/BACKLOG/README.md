@@ -28,6 +28,7 @@ the epic and individual story files for each unit of work.
 | epic07 — Technical Debt | [epic07-technical-debt/](epic07-technical-debt/) | Issues and improvements discovered during implementation | — | Ongoing |
 | epic08 — Pluggable Agent | [epic08-pluggable-agent/](epic08-pluggable-agent/) | Replace hardcoded opencode invocation with a pluggable AgentProvider abstraction | epic02, epic03, epic05 | Not Started |
 | epic09 — Native Provider | [epic09-native-provider/](epic09-native-provider/) | Replace k8sgpt dependency with a native cluster watcher; move Fingerprint to domain | epic01 | Not Started |
+| epic11 — Self-Remediation Cascade Prevention | [epic11-self-remediation-cascade/](epic11-self-remediation-cascade/) | Prevent infinite cascades where mendabot analyzes its own failures | epic01, epic02, epic04 | In Progress |
 
 ## Implementation Order
 
@@ -44,6 +45,7 @@ epic00-foundation
 
 epic08-pluggable-agent (depends on epic02, epic03, epic05)
 epic09-native-provider (depends on epic01)
+epic11-self-remediation-cascade (depends on epic01, epic02, epic04)
 ```
 
 ## Feature Tracker

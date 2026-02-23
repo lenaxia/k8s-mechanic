@@ -37,10 +37,12 @@ set -euo pipefail
 TOKEN=$(get-github-app-token.sh)
 printf '%s' "$TOKEN" > /workspace/github-token
 
-# Use TARGET_REPO_OVERRIDE if set, otherwise use GITOPS_REPO
-TARGET_REPO="${TARGET_REPO_OVERRIDE:-$GITOPS_REPO}"
-
-git clone "https://x-access-token:${TOKEN}@github.com/${TARGET_REPO}.git" /workspace/repo`
+echo "Cloning repository: ${GITOPS_REPO}"
+if ! git clone "https://x-access-token:${TOKEN}@github.com/${GITOPS_REPO}.git" /workspace/repo; then
+  echo "ERROR: Failed to clone ${GITOPS_REPO}"
+  echo "The GitHub App token does not have access to this repository"
+  exit 1
+fi`
 
 func (b *Builder) Build(rjob *v1alpha1.RemediationJob) (*batchv1.Job, error) {
 	if rjob == nil {
@@ -88,10 +90,6 @@ func (b *Builder) Build(rjob *v1alpha1.RemediationJob) (*batchv1.Job, error) {
 			{
 				Name:  "GITOPS_REPO",
 				Value: rjob.Spec.GitOpsRepo,
-			},
-			{
-				Name:  "TARGET_REPO_OVERRIDE",
-				Value: rjob.Spec.TargetRepoOverride,
 			},
 		},
 		VolumeMounts: []corev1.VolumeMount{
@@ -165,7 +163,6 @@ func (b *Builder) Build(rjob *v1alpha1.RemediationJob) (*batchv1.Job, error) {
 			},
 			{Name: "IS_SELF_REMEDIATION", Value: strconv.FormatBool(rjob.Spec.IsSelfRemediation)},
 			{Name: "CHAIN_DEPTH", Value: strconv.Itoa(rjob.Spec.ChainDepth)},
-			{Name: "TARGET_REPO_OVERRIDE", Value: rjob.Spec.TargetRepoOverride},
 		},
 		VolumeMounts: []corev1.VolumeMount{
 			{

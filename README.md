@@ -161,18 +161,18 @@ The agent runs as non-root (`uid=1000`).
 
 The GitHub App requires:
 
-| Permission | Level |
-|---|---|
-| Contents | Write |
-| Pull requests | Write |
-| Issues | Write |
+| Permission | Level | Purpose |
+|---|---|---|
+| Contents | Write | Clone repository, create branches, push changes |
+| Pull requests | Write | Create and comment on pull requests |
+| Issues | Write | Reference issues in PR descriptions |
 
 The `secret-github-app` Secret must contain three keys:
 
 ```yaml
 data:
   app-id: <GitHub App ID>
-  installation-id: <Installation ID for your org/repo>
+  installation-id: <Installation ID for your repository>
   private-key: <PEM-encoded RSA private key>
 ```
 
@@ -218,6 +218,8 @@ Required variables must be set or the watcher will fail to start.
 | `REMEDIATION_JOB_TTL_SECONDS` | `604800` | Seconds after which a `Succeeded` RemediationJob is deleted (default: 7 days) |
 | `SINK_TYPE` | `github` | Sink implementation for the agent to use |
 | `LOG_LEVEL` | `info` | Log verbosity: `debug`, `info`, `warn`, `error` |
+ | `SELF_REMEDIATION_MAX_DEPTH` | `2` | Maximum chain depth for self-remediation cascades (0 = disable, max: 10) |
+ | `SELF_REMEDIATION_COOLDOWN_SECONDS` | `300` | Cooldown period between self-remediations in seconds (max: 3600) |
 
 ### Secrets
 
@@ -229,6 +231,35 @@ Required variables must be set or the watcher will fail to start.
 | `secret-llm` | `api-key` | LLM API key |
 | `secret-llm` | `base-url` | LLM API base URL (optional; for non-OpenAI endpoints) |
 | `secret-llm` | `model` | LLM model name (optional) |
+
+### Configuration Validation
+
+The watcher validates configuration at startup with clear error messages:
+
+**Numeric Validations:**
+- `SELF_REMEDIATION_MAX_DEPTH`: Must be ≥ 0 and ≤ 10 (prevents infinite cascades)
+- `SELF_REMEDIATION_COOLDOWN_SECONDS`: Must be ≥ 0 and ≤ 3600 (1 hour maximum)
+- `MAX_CONCURRENT_JOBS`: Must be > 0 (positive integer)
+- `REMEDIATION_JOB_TTL_SECONDS`: Must be > 0 (positive integer)
+- `STABILISATION_WINDOW_SECONDS`: Must be ≥ 0
+
+ **Format Validations:**
+ - `GITOPS_REPO`: Must be in `owner/repo` format
+
+ **Example Configurations:**
+
+ ```bash
+ # Production-safe configuration
+ SELF_REMEDIATION_MAX_DEPTH=2
+ SELF_REMEDIATION_COOLDOWN_SECONDS=300
+
+ # Disable cascade prevention entirely
+ SELF_REMEDIATION_MAX_DEPTH=0
+
+ # Debug configuration (not for production)
+ SELF_REMEDIATION_MAX_DEPTH=10
+ SELF_REMEDIATION_COOLDOWN_SECONDS=60
+ ```
 
 See [`docs/DESIGN/lld/DEPLOY_LLD.md`](docs/DESIGN/lld/DEPLOY_LLD.md) for the full
 configuration reference.

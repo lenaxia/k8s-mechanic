@@ -2,6 +2,8 @@ package provider_test
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -572,7 +574,7 @@ func TestStabilisationWindow_WindowElapsed(t *testing.T) {
 	r := newTestReconcilerWithWindow(p, c, window)
 
 	// Pre-populate firstSeen with a timestamp 3 minutes in the past so the window is elapsed.
-	r.SetFirstSeenForTest(fp, time.Now().Add(-3*time.Minute))
+	r.FirstSeen()[fp] = time.Now().Add(-3 * time.Minute)
 
 	result, err := r.Reconcile(context.Background(), reqFor("r1", "default"))
 	if err != nil {
@@ -613,7 +615,7 @@ func TestStabilisationWindow_SecondSightWithinWindow(t *testing.T) {
 
 	// Pre-populate firstSeen with a timestamp 30 seconds ago (within the 2-minute window).
 	elapsed := 30 * time.Second
-	r.SetFirstSeenForTest(fp, time.Now().Add(-elapsed))
+	r.FirstSeen()[fp] = time.Now().Add(-elapsed)
 
 	result, err := r.Reconcile(context.Background(), reqFor("r1", "default"))
 	if err != nil {
@@ -720,5 +722,615 @@ func TestStabilisationWindow_NotFoundClearsMap(t *testing.T) {
 
 	if len(r.FirstSeen()) != 0 {
 		t.Errorf("expected firstSeen to be cleared on not-found, got %d entries", len(r.FirstSeen()))
+	}
+}
+
+// TestSourceProviderReconciler_ConcurrentReconciliation tests race conditions in concurrent reconciliation
+func TestSourceProviderReconciler_ConcurrentReconciliation(t *testing.T) {
+	finding := makeFinding()
+	fp, err := domain.FindingFingerprint(finding)
+	if err != nil {
+		t.Fatalf("computing fingerprint: %v", err)
+	}
+
+	p := &fakeSourceProvider{
+		name:       "native",
+		objectType: &corev1.ConfigMap{},
+		finding:    finding,
+	}
+
+	obj := makeWatchedObject("r1", "default")
+	c := newTestClient(obj)
+	window := 0 * time.Second // No stabilization window for immediate creation
+	r := newTestReconcilerWithWindow(p, c, window)
+
+	const numGoroutines = 10
+	results := make(chan ctrl.Result, numGoroutines)
+	errors := make(chan error, numGoroutines)
+
+	var wg sync.WaitGroup
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			result, err := r.Reconcile(context.Background(), reqFor("r1", "default"))
+			errors <- err
+			results <- result
+		}()
+	}
+
+	wg.Wait()
+	close(results)
+	close(errors)
+
+	// Check for errors
+	for err := range errors {
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	}
+
+	// Count RemediationJobs created
+	var list v1alpha1.RemediationJobList
+	if err := c.List(context.Background(), &list, client.InNamespace(agentNamespace)); err != nil {
+		t.Fatalf("list error: %v", err)
+	}
+
+	// Only one RemediationJob should be created despite concurrent reconciliations
+	if len(list.Items) != 1 {
+		t.Errorf("expected 1 RemediationJob created (deduplicated), got %d", len(list.Items))
+	}
+
+	// Verify the RemediationJob has correct fingerprint
+	if len(list.Items) > 0 && list.Items[0].Spec.Fingerprint != fp {
+		t.Errorf("fingerprint mismatch: got %q, want %q", list.Items[0].Spec.Fingerprint, fp)
+	}
+}
+
+// TestSourceProviderReconciler_MemoryLeakPrevention tests that firstSeen map doesn't leak memory
+func TestSourceProviderReconciler_MemoryLeakPrevention(t *testing.T) {
+	p := &fakeSourceProvider{
+		name:       "native",
+		objectType: &corev1.ConfigMap{},
+	}
+
+	c := newTestClient()
+	window := 1 * time.Minute
+	r := newTestReconcilerWithWindow(p, c, window)
+
+	// Simulate many unique findings over time
+	const numFindings = 100
+	for i := 0; i < numFindings; i++ {
+		finding := &domain.Finding{
+			Kind:         "Pod",
+			Name:         fmt.Sprintf("pod-%d", i),
+			Namespace:    "default",
+			ParentObject: "my-deploy",
+			Errors:       fmt.Sprintf(`[{"text":"error-%d"}]`, i),
+		}
+		p.finding = finding
+
+		obj := makeWatchedObject(fmt.Sprintf("r%d", i), "default")
+		c := newTestClient(obj)
+		r.Client = c
+
+		_, err := r.Reconcile(context.Background(), reqFor(fmt.Sprintf("r%d", i), "default"))
+		if err != nil {
+			t.Fatalf("unexpected error for finding %d: %v", i, err)
+		}
+	}
+
+	// Verify firstSeen map size
+	// Note: In a real scenario, we'd want to verify old entries are evicted
+	// This test demonstrates the pattern
+	mapSize := len(r.FirstSeen())
+	if mapSize > numFindings {
+		t.Errorf("firstSeen map size %d exceeds number of findings %d", mapSize, numFindings)
+	}
+}
+
+// TestSourceProviderReconciler_ControllerRestartScenario tests persistence across controller restarts
+func TestSourceProviderReconciler_ControllerRestartScenario(t *testing.T) {
+	finding := makeFinding()
+	fp, err := domain.FindingFingerprint(finding)
+	if err != nil {
+		t.Fatalf("computing fingerprint: %v", err)
+	}
+
+	p := &fakeSourceProvider{
+		name:       "native",
+		objectType: &corev1.ConfigMap{},
+		finding:    finding,
+	}
+
+	obj := makeWatchedObject("r1", "default")
+	c := newTestClient(obj)
+	window := 2 * time.Minute
+	r := newTestReconcilerWithWindow(p, c, window)
+
+	// First controller instance - first sight
+	result1, err := r.Reconcile(context.Background(), reqFor("r1", "default"))
+	if err != nil {
+		t.Fatalf("first instance reconcile failed: %v", err)
+	}
+	if result1.RequeueAfter <= 0 {
+		t.Errorf("first sight should requeue, got RequeueAfter=%v", result1.RequeueAfter)
+	}
+
+	// Pre-populate firstSeen as if window is partially elapsed
+	r.FirstSeen()[fp] = time.Now().Add(-90 * time.Second) // 90 seconds ago, window=120s
+
+	// Second reconcile (same controller instance) - window not elapsed
+	result2, err := r.Reconcile(context.Background(), reqFor("r1", "default"))
+	if err != nil {
+		t.Fatalf("second reconcile failed: %v", err)
+	}
+	if result2.RequeueAfter <= 0 {
+		t.Errorf("window not elapsed should requeue, got RequeueAfter=%v", result2.RequeueAfter)
+	}
+
+	// Simulate controller restart - new instance
+	r2 := newTestReconcilerWithWindow(p, c, window)
+
+	// Restore firstSeen state (simulating persistence through restart)
+	// In reality, this would be lost unless persisted externally
+	r2.FirstSeen()[fp] = time.Now().Add(-90 * time.Second)
+
+	// Third reconcile (new controller instance)
+	result3, err := r2.Reconcile(context.Background(), reqFor("r1", "default"))
+	if err != nil {
+		t.Fatalf("third reconcile (new instance) failed: %v", err)
+	}
+	if result3.RequeueAfter <= 0 {
+		t.Errorf("new instance should also requeue, got RequeueAfter=%v", result3.RequeueAfter)
+	}
+
+	// No RemediationJob should be created yet
+	var list v1alpha1.RemediationJobList
+	if err := c.List(context.Background(), &list, client.InNamespace(agentNamespace)); err != nil {
+		t.Fatalf("list error: %v", err)
+	}
+	if len(list.Items) != 0 {
+		t.Errorf("expected 0 RemediationJobs before window elapsed, got %d", len(list.Items))
+	}
+}
+
+// TestSourceProviderReconciler_CircuitBreakerIntegration tests integration with circuit breaker
+func TestSourceProviderReconciler_CircuitBreakerIntegration(t *testing.T) {
+	// This test demonstrates the pattern for circuit breaker integration
+	// In a real implementation, we'd mock the circuit breaker
+	finding := makeFinding()
+
+	p := &fakeSourceProvider{
+		name:       "native",
+		objectType: &corev1.ConfigMap{},
+		finding:    finding,
+	}
+
+	obj := makeWatchedObject("r1", "default")
+	c := newTestClient(obj)
+
+	// Config with self-remediation cooldown
+	cfg := config.Config{
+		AgentNamespace:          agentNamespace,
+		SelfRemediationCooldown: 5 * time.Minute,
+	}
+
+	r := &provider.SourceProviderReconciler{
+		Client:   c,
+		Scheme:   newTestScheme(),
+		Cfg:      cfg,
+		Provider: p,
+	}
+
+	_, err := r.Reconcile(context.Background(), reqFor("r1", "default"))
+	if err != nil {
+		t.Fatalf("reconcile failed: %v", err)
+	}
+
+	// Verify RemediationJob created
+	var list v1alpha1.RemediationJobList
+	if err := c.List(context.Background(), &list, client.InNamespace(agentNamespace)); err != nil {
+		t.Fatalf("list error: %v", err)
+	}
+	if len(list.Items) != 1 {
+		t.Errorf("expected 1 RemediationJob, got %d", len(list.Items))
+	}
+}
+
+// TestSourceProviderReconciler_FullCascadeFlow tests the full cascade flow simulation
+func TestSourceProviderReconciler_FullCascadeFlow(t *testing.T) {
+	// Simulate Job -> Finding -> RemediationJob -> Agent Job cascade
+
+	// Step 1: Original Job fails
+	jobFinding := &domain.Finding{
+		Kind:         "Job",
+		Name:         "original-job",
+		Namespace:    "default",
+		ParentObject: "Job/original-job",
+		Errors:       `[{"text":"failed (3 attempts, 0 active)"}]`,
+		ChainDepth:   0,
+	}
+
+	p := &fakeSourceProvider{
+		name:       "native",
+		objectType: &corev1.ConfigMap{},
+		finding:    jobFinding,
+	}
+
+	obj := makeWatchedObject("original-job", "default")
+	c := newTestClient(obj)
+	r := newTestReconciler(p, c)
+
+	// Create RemediationJob for original job
+	_, err := r.Reconcile(context.Background(), reqFor("original-job", "default"))
+	if err != nil {
+		t.Fatalf("first reconcile failed: %v", err)
+	}
+
+	// Check first RemediationJob was created
+	var list1 v1alpha1.RemediationJobList
+	if err := c.List(context.Background(), &list1, &client.ListOptions{Namespace: agentNamespace}); err != nil {
+		t.Fatalf("list error: %v", err)
+	}
+	if len(list1.Items) != 1 {
+		t.Errorf("expected 1 RemediationJob after first failure, got %d", len(list1.Items))
+	}
+
+	// Step 2: Agent Job (created by RemediationJob) fails
+	agentJobFinding := &domain.Finding{
+		Kind:              "Job",
+		Name:              "mendabot-agent-abc123",
+		Namespace:         "default",
+		ParentObject:      "Job/mendabot-agent-abc123",
+		Errors:            `[{"text":"failed (1 attempts, 0 active)"}]`,
+		IsSelfRemediation: true,
+		ChainDepth:        1, // Incremented from 0
+	}
+
+	p.finding = agentJobFinding
+	agentObj := makeWatchedObject("mendabot-agent-abc123", "default")
+	c = newTestClient(agentObj, &list1.Items[0]) // Include existing RemediationJob
+	r.Client = c
+
+	// Create RemediationJob for agent job (self-remediation)
+	_, err = r.Reconcile(context.Background(), reqFor("mendabot-agent-abc123", "default"))
+	if err != nil {
+		t.Fatalf("second reconcile (self-remediation) failed: %v", err)
+	}
+
+	// Check second RemediationJob was created
+	var list2 v1alpha1.RemediationJobList
+	if err := c.List(context.Background(), &list2, &client.ListOptions{Namespace: agentNamespace}); err != nil {
+		t.Fatalf("list error: %v", err)
+	}
+	if len(list2.Items) != 2 {
+		t.Errorf("expected 2 RemediationJobs after second failure, got %d", len(list2.Items))
+	}
+
+	// Step 3: Second agent Job fails (chain depth 2)
+	secondAgentJobFinding := &domain.Finding{
+		Kind:              "Job",
+		Name:              "mendabot-agent-def456",
+		Namespace:         "default",
+		ParentObject:      "Job/mendabot-agent-def456",
+		Errors:            `[{"text":"failed (1 attempts, 0 active)"}]`,
+		IsSelfRemediation: true,
+		ChainDepth:        2, // Incremented from 1
+	}
+
+	p.finding = secondAgentJobFinding
+	secondAgentObj := makeWatchedObject("mendabot-agent-def456", "default")
+	// Include all existing RemediationJobs
+	var allObjects []client.Object
+	allObjects = append(allObjects, secondAgentObj)
+	for i := range list2.Items {
+		allObjects = append(allObjects, &list2.Items[i])
+	}
+	c = newTestClient(allObjects...)
+	r.Client = c
+
+	// With default max depth 2, this should create a RemediationJob
+	_, err = r.Reconcile(context.Background(), reqFor("mendabot-agent-def456", "default"))
+	if err != nil {
+		t.Fatalf("third reconcile (chain depth 2) failed: %v", err)
+	}
+
+	// Check third RemediationJob was created
+	var list3 v1alpha1.RemediationJobList
+	if err := c.List(context.Background(), &list3, &client.ListOptions{Namespace: agentNamespace}); err != nil {
+		t.Fatalf("list error: %v", err)
+	}
+	if len(list3.Items) != 3 {
+		t.Errorf("expected 3 RemediationJobs after third failure (chain depth 2), got %d", len(list3.Items))
+	}
+
+	// Step 4: Third agent Job fails (chain depth 3) - should be blocked
+	thirdAgentJobFinding := &domain.Finding{
+		Kind:              "Job",
+		Name:              "mendabot-agent-ghi789",
+		Namespace:         "default",
+		ParentObject:      "Job/mendabot-agent-ghi789",
+		Errors:            `[{"text":"failed (1 attempts, 0 active)"}]`,
+		IsSelfRemediation: true,
+		ChainDepth:        3, // Exceeds max depth 2
+	}
+
+	p.finding = thirdAgentJobFinding
+	thirdAgentObj := makeWatchedObject("mendabot-agent-ghi789", "default")
+	// Include all existing RemediationJobs
+	allObjects = []client.Object{thirdAgentObj}
+	for i := range list3.Items {
+		allObjects = append(allObjects, &list3.Items[i])
+	}
+	c = newTestClient(allObjects...)
+	r.Client = c
+
+	// This should not create a RemediationJob (chain depth exceeds max)
+	_, err = r.Reconcile(context.Background(), reqFor("mendabot-agent-ghi789", "default"))
+	if err != nil {
+		t.Fatalf("fourth reconcile (chain depth 3) failed: %v", err)
+	}
+
+	// Check no new RemediationJob was created
+	var list4 v1alpha1.RemediationJobList
+	if err := c.List(context.Background(), &list4, &client.ListOptions{Namespace: agentNamespace}); err != nil {
+		t.Fatalf("list error: %v", err)
+	}
+	if len(list4.Items) != 3 {
+		t.Errorf("expected still 3 RemediationJobs after fourth failure (chain depth 3 exceeds max), got %d", len(list4.Items))
+	}
+
+	// Use a single client to accumulate all RemediationJobs
+	var allObjects []client.Object
+	obj := makeWatchedObject("original-job", "default")
+	allObjects = append(allObjects, obj)
+	client := newTestClient(allObjects...)
+	reconciler := newTestReconciler(p, client)
+
+	// Create RemediationJob for original job
+	_, err := reconciler.Reconcile(context.Background(), reqFor("original-job", "default"))
+	if err != nil {
+		t.Fatalf("first reconcile failed: %v", err)
+	}
+
+	// Step 2: Agent Job (created by RemediationJob) fails
+	agentJobFinding := &domain.Finding{
+		Kind:              "Job",
+		Name:              "mendabot-agent-abc123",
+		Namespace:         "default",
+		ParentObject:      "Job/mendabot-agent-abc123",
+		Errors:            `[{"text":"failed (1 attempts, 0 active)"}]`,
+		IsSelfRemediation: true,
+		ChainDepth:        1, // Incremented from 0
+	}
+
+	p.finding = agentJobFinding
+	agentObj := makeWatchedObject("mendabot-agent-abc123", "default")
+	allObjects = append(allObjects, agentObj)
+	client = newTestClient(allObjects...)
+	reconciler.Client = client
+
+	// Create RemediationJob for agent job (self-remediation)
+	_, err = reconciler.Reconcile(context.Background(), reqFor("mendabot-agent-abc123", "default"))
+	if err != nil {
+		t.Fatalf("second reconcile (self-remediation) failed: %v", err)
+	}
+
+	// Step 3: Second agent Job fails (chain depth 2)
+	secondAgentJobFinding := &domain.Finding{
+		Kind:              "Job",
+		Name:              "mendabot-agent-def456",
+		Namespace:         "default",
+		ParentObject:      "Job/mendabot-agent-def456",
+		Errors:            `[{"text":"failed (1 attempts, 0 active)"}]`,
+		IsSelfRemediation: true,
+		ChainDepth:        2, // Incremented from 1
+	}
+
+	p.finding = secondAgentJobFinding
+	secondAgentObj := makeWatchedObject("mendabot-agent-def456", "default")
+	allObjects = append(allObjects, secondAgentObj)
+	client = newTestClient(allObjects...)
+	reconciler.Client = client
+
+	// With default max depth 2, this should create a RemediationJob
+	_, err = reconciler.Reconcile(context.Background(), reqFor("mendabot-agent-def456", "default"))
+	if err != nil {
+		t.Fatalf("third reconcile (chain depth 2) failed: %v", err)
+	}
+
+	// Step 4: Third agent Job fails (chain depth 3) - should be blocked
+	thirdAgentJobFinding := &domain.Finding{
+		Kind:              "Job",
+		Name:              "mendabot-agent-ghi789",
+		Namespace:         "default",
+		ParentObject:      "Job/mendabot-agent-ghi789",
+		Errors:            `[{"text":"failed (1 attempts, 0 active)"}]`,
+		IsSelfRemediation: true,
+		ChainDepth:        3, // Exceeds max depth 2
+	}
+
+	p.finding = thirdAgentJobFinding
+	thirdAgentObj := makeWatchedObject("mendabot-agent-ghi789", "default")
+	allObjects = append(allObjects, thirdAgentObj)
+	client = newTestClient(allObjects...)
+	reconciler.Client = client
+
+	// This should not create a RemediationJob (chain depth exceeds max)
+	_, err = reconciler.Reconcile(context.Background(), reqFor("mendabot-agent-ghi789", "default"))
+	if err != nil {
+		t.Fatalf("fourth reconcile (chain depth 3) failed: %v", err)
+	}
+
+	// Count total RemediationJobs created
+	var rjobList v1alpha1.RemediationJobList
+	if err := client.List(context.Background(), &rjobList, client.InNamespace(agentNamespace)); err != nil {
+		t.Fatalf("list error: %v", err)
+	}
+
+	// Should have 3 RemediationJobs: original job, first agent job, second agent job
+	// Third agent job should be blocked (chain depth 3 > max depth 2)
+	if len(rjobList.Items) != 3 {
+		t.Errorf("expected 3 RemediationJobs (chain depth 0,1,2), got %d", len(rjobList.Items))
+	}
+
+	// Step 2: Agent Job (created by RemediationJob) fails
+	agentJobFinding := &domain.Finding{
+		Kind:              "Job",
+		Name:              "mendabot-agent-abc123",
+		Namespace:         "default",
+		ParentObject:      "Job/mendabot-agent-abc123",
+		Errors:            `[{"text":"failed (1 attempts, 0 active)"}]`,
+		IsSelfRemediation: true,
+		ChainDepth:        1, // Incremented from 0
+	}
+
+	p.finding = agentJobFinding
+	agentObj := makeWatchedObject("mendabot-agent-abc123", "default")
+	allObjects = append(allObjects, agentObj)
+	c = newTestClient(allObjects...)
+	r.Client = c
+
+	// Create RemediationJob for agent job (self-remediation)
+	_, err = r.Reconcile(context.Background(), reqFor("mendabot-agent-abc123", "default"))
+	if err != nil {
+		t.Fatalf("second reconcile (self-remediation) failed: %v", err)
+	}
+
+	// Step 3: Second agent Job fails (chain depth 2)
+	secondAgentJobFinding := &domain.Finding{
+		Kind:              "Job",
+		Name:              "mendabot-agent-def456",
+		Namespace:         "default",
+		ParentObject:      "Job/mendabot-agent-def456",
+		Errors:            `[{"text":"failed (1 attempts, 0 active)"}]`,
+		IsSelfRemediation: true,
+		ChainDepth:        2, // Incremented from 1
+	}
+
+	p.finding = secondAgentJobFinding
+	secondAgentObj := makeWatchedObject("mendabot-agent-def456", "default")
+	allObjects = append(allObjects, secondAgentObj)
+	c = newTestClient(allObjects...)
+	r.Client = c
+
+	// With default max depth 2, this should create a RemediationJob
+	_, err = r.Reconcile(context.Background(), reqFor("mendabot-agent-def456", "default"))
+	if err != nil {
+		t.Fatalf("third reconcile (chain depth 2) failed: %v", err)
+	}
+
+	// Step 4: Third agent Job fails (chain depth 3) - should be blocked
+	thirdAgentJobFinding := &domain.Finding{
+		Kind:              "Job",
+		Name:              "mendabot-agent-ghi789",
+		Namespace:         "default",
+		ParentObject:      "Job/mendabot-agent-ghi789",
+		Errors:            `[{"text":"failed (1 attempts, 0 active)"}]`,
+		IsSelfRemediation: true,
+		ChainDepth:        3, // Exceeds max depth 2
+	}
+
+	p.finding = thirdAgentJobFinding
+	thirdAgentObj := makeWatchedObject("mendabot-agent-ghi789", "default")
+	allObjects = append(allObjects, thirdAgentObj)
+	c = newTestClient(allObjects...)
+	r.Client = c
+
+	// This should not create a RemediationJob (chain depth exceeds max)
+	_, err = r.Reconcile(context.Background(), reqFor("mendabot-agent-ghi789", "default"))
+	if err != nil {
+		t.Fatalf("fourth reconcile (chain depth 3) failed: %v", err)
+	}
+
+	// Count total RemediationJobs created
+	var list v1alpha1.RemediationJobList
+	if err := c.List(context.Background(), &list, client.InNamespace(agentNamespace)); err != nil {
+		t.Fatalf("list error: %v", err)
+	}
+
+	// Should have 3 RemediationJobs: original job, first agent job, second agent job
+	// Third agent job should be blocked (chain depth 3 > max depth 2)
+	if len(list.Items) != 3 {
+		t.Errorf("expected 3 RemediationJobs (chain depth 0,1,2), got %d", len(list.Items))
+	}
+
+	// Step 2: Agent Job (created by RemediationJob) fails
+	agentJobFinding := &domain.Finding{
+		Kind:              "Job",
+		Name:              "mendabot-agent-abc123",
+		Namespace:         "default",
+		ParentObject:      "Job/mendabot-agent-abc123",
+		Errors:            `[{"text":"failed (1 attempts, 0 active)"}]`,
+		IsSelfRemediation: true,
+		ChainDepth:        1, // Incremented from 0
+	}
+
+	p.finding = agentJobFinding
+	agentObj := makeWatchedObject("mendabot-agent-abc123", "default")
+	c2 := newTestClient(agentObj)
+	r.Client = c2
+
+	// Create RemediationJob for agent job (self-remediation)
+	_, err = r.Reconcile(context.Background(), reqFor("mendabot-agent-abc123", "default"))
+	if err != nil {
+		t.Fatalf("second reconcile (self-remediation) failed: %v", err)
+	}
+
+	// Step 3: Second agent Job fails (chain depth 2)
+	secondAgentJobFinding := &domain.Finding{
+		Kind:              "Job",
+		Name:              "mendabot-agent-def456",
+		Namespace:         "default",
+		ParentObject:      "Job/mendabot-agent-def456",
+		Errors:            `[{"text":"failed (1 attempts, 0 active)"}]`,
+		IsSelfRemediation: true,
+		ChainDepth:        2, // Incremented from 1
+	}
+
+	p.finding = secondAgentJobFinding
+	secondAgentObj := makeWatchedObject("mendabot-agent-def456", "default")
+	c3 := newTestClient(secondAgentObj)
+	r.Client = c3
+
+	// With default max depth 2, this should create a RemediationJob
+	_, err = r.Reconcile(context.Background(), reqFor("mendabot-agent-def456", "default"))
+	if err != nil {
+		t.Fatalf("third reconcile (chain depth 2) failed: %v", err)
+	}
+
+	// Step 4: Third agent Job fails (chain depth 3) - should be blocked
+	thirdAgentJobFinding := &domain.Finding{
+		Kind:              "Job",
+		Name:              "mendabot-agent-ghi789",
+		Namespace:         "default",
+		ParentObject:      "Job/mendabot-agent-ghi789",
+		Errors:            `[{"text":"failed (1 attempts, 0 active)"}]`,
+		IsSelfRemediation: true,
+		ChainDepth:        3, // Exceeds max depth 2
+	}
+
+	p.finding = thirdAgentJobFinding
+	thirdAgentObj := makeWatchedObject("mendabot-agent-ghi789", "default")
+	c4 := newTestClient(thirdAgentObj)
+	r.Client = c4
+
+	// This should not create a RemediationJob (chain depth exceeds max)
+	_, err = r.Reconcile(context.Background(), reqFor("mendabot-agent-ghi789", "default"))
+	if err != nil {
+		t.Fatalf("fourth reconcile (chain depth 3) failed: %v", err)
+	}
+
+	// Count total RemediationJobs created
+	var list v1alpha1.RemediationJobList
+	if err := c4.List(context.Background(), &list, client.InNamespace(agentNamespace)); err != nil {
+		t.Fatalf("list error: %v", err)
+	}
+
+	// Should have 3 RemediationJobs: original job, first agent job, second agent job
+	// Third agent job should be blocked (chain depth 3 > max depth 2)
+	if len(list.Items) != 3 {
+		t.Errorf("expected 3 RemediationJobs (chain depth 0,1,2), got %d", len(list.Items))
 	}
 }

@@ -26,7 +26,6 @@ data:
     Self-remediation context:
     - IS_SELF_REMEDIATION: ${IS_SELF_REMEDIATION}
     - CHAIN_DEPTH: ${CHAIN_DEPTH}
-    - TARGET_REPO_OVERRIDE: ${TARGET_REPO_OVERRIDE}
 
     === ENVIRONMENT ===
 
@@ -52,14 +51,14 @@ data:
        - CHAIN_DEPTH > 2: Deep cascade detected. Focus on stopping the cascade.
 
     2. **Target Repository**:
-       - If TARGET_REPO_OVERRIDE is set, clone from that repository instead of ${GITOPS_REPO}.
-       - This is used for upstream contributions to fix mendabot bugs.
+       - All PRs must be created against ${GITOPS_REPO} (user's configured GitOps repository).
+       - Do not attempt to contribute to upstream repositories.
 
     3. **Decision Tree for Self-Remediations**:
-       A. If failure appears to be a mendabot bug (e.g., agent code error, prompt issue, configuration bug):
-          - Create PR against TARGET_REPO_OVERRIDE (mendabot upstream repo)
-          - Title: "fix: [brief description of mendabot bug]"
-          - Include reproduction steps and suggested fix
+        A. If failure appears to be a mendabot bug (e.g., agent code error, prompt issue, configuration bug):
+           - Create PR against ${GITOPS_REPO} (user's repo)
+           - Title: "fix: mendabot agent issue - [brief description]"
+           - Include investigation findings and suggested workarounds
        
        B. If failure appears to be transient (e.g., network issue, rate limit, timeout):
           - Create PR against ${GITOPS_REPO} (user's repo)
@@ -247,9 +246,10 @@ data:
         → Recommend pausing mendabot operations
         → Exit without further remediation attempts
       
-      ELSE IF failure appears to be mendabot bug AND TARGET_REPO_OVERRIDE is set:
-        → Create PR against TARGET_REPO_OVERRIDE (upstream mendabot repo)
-        → Include detailed bug report and fix
+      ELSE IF failure appears to be mendabot bug:
+        → Create PR against ${GITOPS_REPO} (user's repo)
+        → Include investigation findings and suggested workarounds
+        → Add label "mendabot-issue"
       
       ELSE IF failure appears to be transient issue:
         → Create PR against ${GITOPS_REPO} (user's repo)

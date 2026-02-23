@@ -17,6 +17,7 @@ import (
 	v1alpha1 "github.com/lenaxia/k8s-mendabot/api/v1alpha1"
 	"github.com/lenaxia/k8s-mendabot/internal/config"
 	"github.com/lenaxia/k8s-mendabot/internal/domain"
+	"github.com/lenaxia/k8s-mendabot/internal/metrics"
 )
 
 //+kubebuilder:rbac:groups=remediation.mendabot.io,resources=remediationjobs,verbs=get;list;watch;create;update;patch;delete
@@ -96,6 +97,24 @@ func (r *RemediationJobReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 				Reason:             string(newPhase),
 				LastTransitionTime: metav1.Now(),
 			})
+
+			// Record metrics for self-remediation completion
+			if rjob.Spec.IsSelfRemediation {
+				success := newPhase == v1alpha1.PhaseSucceeded
+				// We need to get the provider name from the source type
+				// For native providers, source type is "native"
+				provider := rjob.Spec.SourceType
+				if provider == "" {
+					provider = "unknown"
+				}
+				namespace := rjob.Spec.Finding.Namespace
+				if namespace == "" {
+					namespace = "default"
+				}
+
+				metrics.RecordSelfRemediationAttempt(provider, namespace, success)
+				metrics.UpdateSelfRemediationSuccessRate(provider, namespace)
+			}
 		}
 		if rjob.Status.JobRef == "" {
 			rjob.Status.JobRef = job.Name

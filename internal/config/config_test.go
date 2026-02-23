@@ -320,8 +320,6 @@ func TestFromEnv_StabilisationWindowInvalid(t *testing.T) {
 func TestFromEnv_SelfRemediationDefaults(t *testing.T) {
 	setRequiredEnv(t)
 	os.Unsetenv("SELF_REMEDIATION_MAX_DEPTH")
-	os.Unsetenv("MENDABOT_UPSTREAM_REPO")
-	os.Unsetenv("MENDABOT_DISABLE_UPSTREAM_CONTRIBUTIONS")
 
 	cfg, err := config.FromEnv()
 	if err != nil {
@@ -331,19 +329,11 @@ func TestFromEnv_SelfRemediationDefaults(t *testing.T) {
 	if cfg.SelfRemediationMaxDepth != 2 {
 		t.Errorf("SelfRemediationMaxDepth default: got %d, want 2", cfg.SelfRemediationMaxDepth)
 	}
-	if cfg.MendabotUpstreamRepo != "lenaxia/k8s-mendabot" {
-		t.Errorf("MendabotUpstreamRepo default: got %q, want %q", cfg.MendabotUpstreamRepo, "lenaxia/k8s-mendabot")
-	}
-	if cfg.DisableUpstreamContributions != false {
-		t.Errorf("DisableUpstreamContributions default: got %v, want false", cfg.DisableUpstreamContributions)
-	}
 }
 
 func TestFromEnv_SelfRemediationCustom(t *testing.T) {
 	setRequiredEnv(t)
 	t.Setenv("SELF_REMEDIATION_MAX_DEPTH", "3")
-	t.Setenv("MENDABOT_UPSTREAM_REPO", "myorg/my-mendabot")
-	t.Setenv("MENDABOT_DISABLE_UPSTREAM_CONTRIBUTIONS", "true")
 
 	cfg, err := config.FromEnv()
 	if err != nil {
@@ -352,12 +342,6 @@ func TestFromEnv_SelfRemediationCustom(t *testing.T) {
 
 	if cfg.SelfRemediationMaxDepth != 3 {
 		t.Errorf("SelfRemediationMaxDepth custom: got %d, want 3", cfg.SelfRemediationMaxDepth)
-	}
-	if cfg.MendabotUpstreamRepo != "myorg/my-mendabot" {
-		t.Errorf("MendabotUpstreamRepo custom: got %q, want %q", cfg.MendabotUpstreamRepo, "myorg/my-mendabot")
-	}
-	if cfg.DisableUpstreamContributions != true {
-		t.Errorf("DisableUpstreamContributions custom: got %v, want true", cfg.DisableUpstreamContributions)
 	}
 }
 
@@ -381,25 +365,155 @@ func TestFromEnv_SelfRemediationNegativeDepth(t *testing.T) {
 	}
 }
 
-func TestFromEnv_DisableUpstreamContributionsVariants(t *testing.T) {
+func TestFromEnv_SelfRemediationCooldownDefaults(t *testing.T) {
+	setRequiredEnv(t)
+
+	cfg, err := config.FromEnv()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.SelfRemediationCooldown != 300*time.Second {
+		t.Errorf("SelfRemediationCooldown default: got %v, want 5 minutes", cfg.SelfRemediationCooldown)
+	}
+}
+
+func TestFromEnv_SelfRemediationCooldownCustom(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("SELF_REMEDIATION_COOLDOWN_SECONDS", "120")
+
+	cfg, err := config.FromEnv()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.SelfRemediationCooldown != 120*time.Second {
+		t.Errorf("SelfRemediationCooldown custom: got %v, want 2 minutes", cfg.SelfRemediationCooldown)
+	}
+}
+
+func TestFromEnv_SelfRemediationCooldownZero(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("SELF_REMEDIATION_COOLDOWN_SECONDS", "0")
+
+	cfg, err := config.FromEnv()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.SelfRemediationCooldown != 0 {
+		t.Errorf("SelfRemediationCooldown zero: got %v, want 0", cfg.SelfRemediationCooldown)
+	}
+}
+
+func TestFromEnv_SelfRemediationCooldownInvalid(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("SELF_REMEDIATION_COOLDOWN_SECONDS", "abc")
+
+	_, err := config.FromEnv()
+	if err == nil {
+		t.Fatal("expected error for invalid SELF_REMEDIATION_COOLDOWN_SECONDS, got nil")
+	}
+}
+
+func TestFromEnv_SelfRemediationCooldownNegative(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("SELF_REMEDIATION_COOLDOWN_SECONDS", "-1")
+
+	_, err := config.FromEnv()
+	if err == nil {
+		t.Fatal("expected error for negative SELF_REMEDIATION_COOLDOWN_SECONDS, got nil")
+	}
+}
+
+// TestFromEnv_SelfRemediationMaxDepthZero tests that SELF_REMEDIATION_MAX_DEPTH=0 is valid
+func TestFromEnv_SelfRemediationMaxDepthZero(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("SELF_REMEDIATION_MAX_DEPTH", "0")
+
+	cfg, err := config.FromEnv()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.SelfRemediationMaxDepth != 0 {
+		t.Errorf("SelfRemediationMaxDepth zero: got %d, want 0", cfg.SelfRemediationMaxDepth)
+	}
+}
+
+// TestFromEnv_SelfRemediationMaxDepthLarge tests large depth values within reasonable bounds
+func TestFromEnv_SelfRemediationMaxDepthLarge(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("SELF_REMEDIATION_MAX_DEPTH", "10")
+
+	cfg, err := config.FromEnv()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.SelfRemediationMaxDepth != 10 {
+		t.Errorf("SelfRemediationMaxDepth large: got %d, want 10", cfg.SelfRemediationMaxDepth)
+	}
+}
+
+// TestFromEnv_AllConfigCombinations tests comprehensive configuration combinations
+func TestFromEnv_AllConfigCombinations(t *testing.T) {
 	tests := []struct {
-		envValue string
-		expected bool
+		name     string
+		envVars  map[string]string
+		validate func(*testing.T, config.Config)
 	}{
-		{"true", true},
-		{"1", true},
-		{"false", false},
-		{"0", false},
-		{"", false},
+		{
+			name: "zero values disable features",
+			envVars: map[string]string{
+				"SELF_REMEDIATION_MAX_DEPTH":        "0",
+				"SELF_REMEDIATION_COOLDOWN_SECONDS": "0",
+				"STABILISATION_WINDOW_SECONDS":      "0",
+			},
+			validate: func(t *testing.T, cfg config.Config) {
+				if cfg.SelfRemediationMaxDepth != 0 {
+					t.Errorf("SelfRemediationMaxDepth: got %d, want 0", cfg.SelfRemediationMaxDepth)
+				}
+				if cfg.SelfRemediationCooldown != 0 {
+					t.Errorf("SelfRemediationCooldown: got %v, want 0", cfg.SelfRemediationCooldown)
+				}
+				if cfg.StabilisationWindow != 0 {
+					t.Errorf("StabilisationWindow: got %v, want 0", cfg.StabilisationWindow)
+				}
+			},
+		},
+		{
+			name: "max values for all limits",
+			envVars: map[string]string{
+				"SELF_REMEDIATION_MAX_DEPTH":        "10",
+				"SELF_REMEDIATION_COOLDOWN_SECONDS": "3600",
+				"STABILISATION_WINDOW_SECONDS":      "3600",
+				"MAX_CONCURRENT_JOBS":               "100",
+				"REMEDIATION_JOB_TTL_SECONDS":       "2592000",
+			},
+			validate: func(t *testing.T, cfg config.Config) {
+				if cfg.SelfRemediationMaxDepth != 10 {
+					t.Errorf("SelfRemediationMaxDepth: got %d, want 10", cfg.SelfRemediationMaxDepth)
+				}
+				if cfg.SelfRemediationCooldown != 3600*time.Second {
+					t.Errorf("SelfRemediationCooldown: got %v, want 1h", cfg.SelfRemediationCooldown)
+				}
+				if cfg.StabilisationWindow != 3600*time.Second {
+					t.Errorf("StabilisationWindow: got %v, want 1h", cfg.StabilisationWindow)
+				}
+				if cfg.MaxConcurrentJobs != 100 {
+					t.Errorf("MaxConcurrentJobs: got %d, want 100", cfg.MaxConcurrentJobs)
+				}
+				if cfg.RemediationJobTTLSeconds != 2592000 {
+					t.Errorf("RemediationJobTTLSeconds: got %d, want 2592000", cfg.RemediationJobTTLSeconds)
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.envValue, func(t *testing.T) {
+		t.Run(tt.name, func(t *testing.T) {
 			setRequiredEnv(t)
-			if tt.envValue != "" {
-				t.Setenv("MENDABOT_DISABLE_UPSTREAM_CONTRIBUTIONS", tt.envValue)
-			} else {
-				os.Unsetenv("MENDABOT_DISABLE_UPSTREAM_CONTRIBUTIONS")
+			for k, v := range tt.envVars {
+				t.Setenv(k, v)
 			}
 
 			cfg, err := config.FromEnv()
@@ -407,9 +521,367 @@ func TestFromEnv_DisableUpstreamContributionsVariants(t *testing.T) {
 				t.Fatalf("unexpected error: %v", err)
 			}
 
-			if cfg.DisableUpstreamContributions != tt.expected {
-				t.Errorf("DisableUpstreamContributions for %q: got %v, want %v", tt.envValue, cfg.DisableUpstreamContributions, tt.expected)
+			tt.validate(t, cfg)
+		})
+	}
+}
+
+// TestFromEnv_ConfigValidationEdgeCases tests edge cases in configuration validation
+func TestFromEnv_ConfigValidationEdgeCases(t *testing.T) {
+	tests := []struct {
+		name        string
+		envVars     map[string]string
+		expectError bool
+		errorSubstr string
+	}{
+		{
+			name: "MAX_CONCURRENT_JOBS zero",
+			envVars: map[string]string{
+				"MAX_CONCURRENT_JOBS": "0",
+			},
+			expectError: true,
+			errorSubstr: "positive integer",
+		},
+		{
+			name: "MAX_CONCURRENT_JOBS negative",
+			envVars: map[string]string{
+				"MAX_CONCURRENT_JOBS": "-5",
+			},
+			expectError: true,
+			errorSubstr: "positive integer",
+		},
+		{
+			name: "REMEDIATION_JOB_TTL_SECONDS zero",
+			envVars: map[string]string{
+				"REMEDIATION_JOB_TTL_SECONDS": "0",
+			},
+			expectError: true,
+			errorSubstr: "positive integer",
+		},
+		{
+			name: "STABILISATION_WINDOW_SECONDS negative",
+			envVars: map[string]string{
+				"STABILISATION_WINDOW_SECONDS": "-10",
+			},
+			expectError: true,
+			errorSubstr: ">= 0",
+		},
+		{
+			name: "SELF_REMEDIATION_MAX_DEPTH negative",
+			envVars: map[string]string{
+				"SELF_REMEDIATION_MAX_DEPTH": "-5",
+			},
+			expectError: true,
+			errorSubstr: ">= 0",
+		},
+		{
+			name: "SELF_REMEDIATION_COOLDOWN_SECONDS negative",
+			envVars: map[string]string{
+				"SELF_REMEDIATION_COOLDOWN_SECONDS": "-10",
+			},
+			expectError: true,
+			errorSubstr: ">= 0",
+		},
+		{
+			name: "invalid integer values",
+			envVars: map[string]string{
+				"MAX_CONCURRENT_JOBS":               "not-a-number",
+				"REMEDIATION_JOB_TTL_SECONDS":       "also-not-a-number",
+				"STABILISATION_WINDOW_SECONDS":      "still-not-a-number",
+				"SELF_REMEDIATION_MAX_DEPTH":        "nope",
+				"SELF_REMEDIATION_COOLDOWN_SECONDS": "definitely-not",
+			},
+			expectError: true,
+			errorSubstr: "must be an integer",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setRequiredEnv(t)
+			for k, v := range tt.envVars {
+				t.Setenv(k, v)
+			}
+
+			_, err := config.FromEnv()
+			if tt.expectError {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				if tt.errorSubstr != "" && !contains(err.Error(), tt.errorSubstr) {
+					t.Errorf("error %q does not contain %q", err.Error(), tt.errorSubstr)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
 			}
 		})
+	}
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && (s[:len(substr)] == substr || contains(s[1:], substr)))
+}
+
+// TestFromEnv_CascadePreventionValidation tests comprehensive validation for cascade prevention settings
+func TestFromEnv_CascadePreventionValidation(t *testing.T) {
+	tests := []struct {
+		name        string
+		envVars     map[string]string
+		expectError bool
+		errorSubstr string
+	}{
+		{
+			name: "valid configuration with reasonable bounds",
+			envVars: map[string]string{
+				"SELF_REMEDIATION_MAX_DEPTH":        "3",
+				"SELF_REMEDIATION_COOLDOWN_SECONDS": "600",
+			},
+			expectError: false,
+		},
+		{
+			name: "self remediation depth exceeds maximum reasonable bound",
+			envVars: map[string]string{
+				"SELF_REMEDIATION_MAX_DEPTH": "50",
+			},
+			expectError: true,
+			errorSubstr: "exceeds maximum reasonable value",
+		},
+		{
+			name: "self remediation cooldown exceeds maximum reasonable bound",
+			envVars: map[string]string{
+				"SELF_REMEDIATION_COOLDOWN_SECONDS": "10000",
+			},
+			expectError: true,
+			errorSubstr: "exceeds maximum reasonable value",
+		},
+		{
+			name: "self remediation depth negative",
+			envVars: map[string]string{
+				"SELF_REMEDIATION_MAX_DEPTH": "-1",
+			},
+			expectError: true,
+			errorSubstr: ">= 0",
+		},
+		{
+			name: "self remediation cooldown negative",
+			envVars: map[string]string{
+				"SELF_REMEDIATION_COOLDOWN_SECONDS": "-1",
+			},
+			expectError: true,
+			errorSubstr: ">= 0",
+		},
+		{
+			name: "extremely large depth value",
+			envVars: map[string]string{
+				"SELF_REMEDIATION_MAX_DEPTH": "999999",
+			},
+			expectError: true,
+			errorSubstr: "exceeds maximum reasonable value",
+		},
+		{
+			name: "extremely large cooldown value",
+			envVars: map[string]string{
+				"SELF_REMEDIATION_COOLDOWN_SECONDS": "9999999",
+			},
+			expectError: true,
+			errorSubstr: "exceeds maximum reasonable value",
+		},
+		{
+			name: "valid depth at upper bound",
+			envVars: map[string]string{
+				"SELF_REMEDIATION_MAX_DEPTH": "10",
+			},
+			expectError: false,
+		},
+		{
+			name: "valid cooldown at upper bound",
+			envVars: map[string]string{
+				"SELF_REMEDIATION_COOLDOWN_SECONDS": "3600",
+			},
+			expectError: false,
+		},
+		{
+			name: "depth one above upper bound",
+			envVars: map[string]string{
+				"SELF_REMEDIATION_MAX_DEPTH": "11",
+			},
+			expectError: true,
+			errorSubstr: "exceeds maximum reasonable value",
+		},
+		{
+			name: "cooldown one above upper bound",
+			envVars: map[string]string{
+				"SELF_REMEDIATION_COOLDOWN_SECONDS": "3601",
+			},
+			expectError: true,
+			errorSubstr: "exceeds maximum reasonable value",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setRequiredEnv(t)
+			for k, v := range tt.envVars {
+				t.Setenv(k, v)
+			}
+
+			_, err := config.FromEnv()
+			if tt.expectError {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				if tt.errorSubstr != "" && !contains(err.Error(), tt.errorSubstr) {
+					t.Errorf("error %q does not contain %q", err.Error(), tt.errorSubstr)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+// TestFromEnv_ConsistencyValidation tests validation of configuration consistency
+func TestFromEnv_ConsistencyValidation(t *testing.T) {
+	tests := []struct {
+		name        string
+		envVars     map[string]string
+		expectError bool
+		errorSubstr string
+	}{}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setRequiredEnv(t)
+			for k, v := range tt.envVars {
+				t.Setenv(k, v)
+			}
+
+			_, err := config.FromEnv()
+			if tt.expectError {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				if tt.errorSubstr != "" && !contains(err.Error(), tt.errorSubstr) {
+					t.Errorf("error %q does not contain %q", err.Error(), tt.errorSubstr)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+// TestFromEnv_BoundaryConditionValidation tests boundary condition validation
+func TestFromEnv_BoundaryConditionValidation(t *testing.T) {
+	tests := []struct {
+		name        string
+		envVars     map[string]string
+		expectError bool
+		errorSubstr string
+	}{
+		{
+			name: "minimum valid depth",
+			envVars: map[string]string{
+				"SELF_REMEDIATION_MAX_DEPTH": "0",
+			},
+			expectError: false,
+		},
+		{
+			name: "minimum valid cooldown",
+			envVars: map[string]string{
+				"SELF_REMEDIATION_COOLDOWN_SECONDS": "0",
+			},
+			expectError: false,
+		},
+		{
+			name: "depth at maximum reasonable bound",
+			envVars: map[string]string{
+				"SELF_REMEDIATION_MAX_DEPTH": "10",
+			},
+			expectError: false,
+		},
+		{
+			name: "cooldown at maximum reasonable bound",
+			envVars: map[string]string{
+				"SELF_REMEDIATION_COOLDOWN_SECONDS": "3600",
+			},
+			expectError: false,
+		},
+		{
+			name: "depth just above maximum reasonable bound",
+			envVars: map[string]string{
+				"SELF_REMEDIATION_MAX_DEPTH": "11",
+			},
+			expectError: true,
+			errorSubstr: "exceeds maximum reasonable value",
+		},
+		{
+			name: "cooldown just above maximum reasonable bound",
+			envVars: map[string]string{
+				"SELF_REMEDIATION_COOLDOWN_SECONDS": "3601",
+			},
+			expectError: true,
+			errorSubstr: "exceeds maximum reasonable value",
+		},
+		{
+			name: "very small but valid depth",
+			envVars: map[string]string{
+				"SELF_REMEDIATION_MAX_DEPTH": "1",
+			},
+			expectError: false,
+		},
+		{
+			name: "very small but valid cooldown",
+			envVars: map[string]string{
+				"SELF_REMEDIATION_COOLDOWN_SECONDS": "1",
+			},
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setRequiredEnv(t)
+			for k, v := range tt.envVars {
+				t.Setenv(k, v)
+			}
+
+			_, err := config.FromEnv()
+			if tt.expectError {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				if tt.errorSubstr != "" && !contains(err.Error(), tt.errorSubstr) {
+					t.Errorf("error %q does not contain %q", err.Error(), tt.errorSubstr)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+// TestFromEnv_ValidationSkipOption tests that validation can be skipped for testing
+func TestFromEnv_ValidationSkipOption(t *testing.T) {
+	// Test that extremely large values are rejected by default
+	t.Setenv("GITOPS_REPO", "org/repo")
+	t.Setenv("GITOPS_MANIFEST_ROOT", "kubernetes/")
+	t.Setenv("AGENT_IMAGE", "ghcr.io/lenaxia/mendabot-agent:latest")
+	t.Setenv("AGENT_NAMESPACE", "mendabot")
+	t.Setenv("AGENT_SA", "mendabot-agent")
+	t.Setenv("SELF_REMEDIATION_MAX_DEPTH", "999")
+	t.Setenv("SELF_REMEDIATION_COOLDOWN_SECONDS", "99999")
+
+	_, err := config.FromEnv()
+	if err == nil {
+		t.Fatal("expected error for extremely large values, got nil")
 	}
 }

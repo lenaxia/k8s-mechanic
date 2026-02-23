@@ -42,6 +42,11 @@ spec:
           value: "604800"
         # - name: STABILISATION_WINDOW_SECONDS
         #   value: "120"  # default: 120s; set to 0 to disable and create jobs immediately
+        # Self-remediation cascade prevention configuration
+        - name: SELF_REMEDIATION_MAX_DEPTH
+          value: "2"
+        - name: SELF_REMEDIATION_COOLDOWN_SECONDS
+          value: "300"
         ports:
         - name: metrics
           containerPort: 8080

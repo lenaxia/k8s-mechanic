@@ -22,7 +22,8 @@ type Config struct {
 	StabilisationWindow      time.Duration // STABILISATION_WINDOW_SECONDS — default 120s; 0 disables
 	// LLMProvider selects the LLM readiness checker used to gate RemediationJob
 	// creation. Accepted values: "openai". Empty (default) disables the check.
-	LLMProvider string // LLM_PROVIDER — default "" (disabled)
+	LLMProvider              string // LLM_PROVIDER — default "" (disabled)
+	InjectionDetectionAction string // INJECTION_DETECTION_ACTION — "log" (default) or "suppress"
 }
 
 // FromEnv reads configuration from environment variables and returns a Config.
@@ -119,6 +120,15 @@ func FromEnv() (Config, error) {
 			cfg.LLMProvider,
 		)
 	}
+
+	action := os.Getenv("INJECTION_DETECTION_ACTION")
+	if action == "" {
+		action = "log"
+	}
+	if action != "log" && action != "suppress" {
+		return Config{}, fmt.Errorf("INJECTION_DETECTION_ACTION must be 'log' or 'suppress', got %q", action)
+	}
+	cfg.InjectionDetectionAction = action
 
 	return cfg, nil
 }

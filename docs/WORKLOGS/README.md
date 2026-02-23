@@ -73,3 +73,5 @@ else.
 | [0051](0051_2026-02-23_epic11-13-branch-extraction-test-fixes.md) | 2026-02-23 | Epic 11+13 branch extraction: test isolation fixes, readiness gate, epic14 test infra | Complete |
 | [0052](0052_2026-02-23_remove-crd-hook-job.md) | 2026-02-23 | Helm: remove CRD hook job in favour of native crds/ directory | Complete |
 | [0053](0053_2026-02-23_epic12-story00-security-infra.md) | 2026-02-23 | Epic 12 STORY_00: Makefile, kind-config, Trivy CI steps, gosec baseline placeholder | Complete |
+| [0054](0054_2026-02-23_story01-secret-redaction.md) | 2026-02-23 | STORY_01: RedactSecrets applied at all 6 native provider error text sites, 8 new tests | Complete |
+| [0055](0055_2026-02-23_story05-prompt-injection-defence.md) | 2026-02-23 | STORY_05: injection detection, truncate helper, config field, prompt envelope, HARD RULE 8 | Complete |

@@ -25,7 +25,8 @@ spec:
           type: RuntimeDefault
       containers:
       - name: kubectl
-        image: registry.k8s.io/kubectl:v1.28.16
+        image: "{{ .Values.crdUpgrader.image.repository }}:{{ .Values.crdUpgrader.image.tag }}"
+        imagePullPolicy: {{ .Values.crdUpgrader.image.pullPolicy }}
         command: ["kubectl", "apply", "-f", "/crds/remediationjob.yaml"]
         env:
         - name: HOME

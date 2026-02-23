@@ -113,6 +113,17 @@ type Finding struct {
 
 	// SourceRef identifies the native object that produced this Finding.
 	SourceRef SourceRef
+
+	// IsSelfRemediation indicates this finding is for a mendabot job failure.
+	IsSelfRemediation bool
+
+	// ChainDepth tracks how many levels deep this self-remediation chain is.
+	// 0 = not a self-remediation, 1 = mendabot job failed, 2 = analysis of why mendabot job failed, etc.
+	ChainDepth int
+
+	// TargetRepoOverride specifies an alternative repository for upstream contributions.
+	// If empty, defaults to GitOpsRepo for regular findings or MendabotUpstreamRepo for self-remediations.
+	TargetRepoOverride string
 }
 
 // SourceRef is a back-reference to the native object that produced a Finding.

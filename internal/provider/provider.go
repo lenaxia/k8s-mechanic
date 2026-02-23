@@ -33,6 +33,9 @@ type SourceProviderReconciler struct {
 	Cfg       config.Config
 	Provider  domain.SourceProvider
 	firstSeen map[string]time.Time
+	// lastSelfRemediation tracks when the last self-remediation was created
+	// to implement a circuit breaker against rapid cascades.
+	lastSelfRemediation time.Time
 }
 
 // FirstSeen returns the firstSeen map for inspection in tests.
@@ -111,6 +114,39 @@ func (r *SourceProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, fmt.Errorf("fingerprint too short: got %d chars, need at least 12", len(fp))
 	}
 
+	// Circuit breaker for self-remediations
+	if finding.IsSelfRemediation {
+		cooldownPeriod := 5 * time.Minute // Default cooldown between self-remediations
+		timeSinceLast := time.Since(r.lastSelfRemediation)
+
+		if timeSinceLast < cooldownPeriod {
+			remaining := cooldownPeriod - timeSinceLast
+			if r.Log != nil {
+				r.Log.Info("circuit breaker: skipping self-remediation due to cooldown",
+					zap.String("fingerprint", fp[:12]),
+					zap.Duration("timeSinceLast", timeSinceLast),
+					zap.Duration("remaining", remaining),
+					zap.Int("chainDepth", finding.ChainDepth),
+				)
+			}
+			return ctrl.Result{RequeueAfter: remaining}, nil
+		}
+
+		// Update last self-remediation time
+		r.lastSelfRemediation = time.Now()
+
+		// Log cascade warning for deep chains
+		if finding.ChainDepth > 2 {
+			if r.Log != nil {
+				r.Log.Warn("deep cascade detected in self-remediation",
+					zap.String("fingerprint", fp[:12]),
+					zap.Int("chainDepth", finding.ChainDepth),
+					zap.String("findingName", finding.Name),
+				)
+			}
+		}
+	}
+
 	// Stabilisation window logic.
 	if r.Cfg.StabilisationWindow == 0 {
 		// fast path: no window, proceed directly to dedup + Job creation
@@ -185,6 +221,9 @@ func (r *SourceProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			GitOpsManifestRoot: r.Cfg.GitOpsManifestRoot,
 			AgentImage:         r.Cfg.AgentImage,
 			AgentSA:            r.Cfg.AgentSA,
+			IsSelfRemediation:  finding.IsSelfRemediation,
+			ChainDepth:         finding.ChainDepth,
+			TargetRepoOverride: finding.TargetRepoOverride,
 		},
 	}
 

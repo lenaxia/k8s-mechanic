@@ -316,3 +316,100 @@ func TestFromEnv_StabilisationWindowInvalid(t *testing.T) {
 		t.Fatal("expected error for STABILISATION_WINDOW_SECONDS=abc, got nil")
 	}
 }
+
+func TestFromEnv_SelfRemediationDefaults(t *testing.T) {
+	setRequiredEnv(t)
+	os.Unsetenv("SELF_REMEDIATION_MAX_DEPTH")
+	os.Unsetenv("MENDABOT_UPSTREAM_REPO")
+	os.Unsetenv("MENDABOT_DISABLE_UPSTREAM_CONTRIBUTIONS")
+
+	cfg, err := config.FromEnv()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.SelfRemediationMaxDepth != 2 {
+		t.Errorf("SelfRemediationMaxDepth default: got %d, want 2", cfg.SelfRemediationMaxDepth)
+	}
+	if cfg.MendabotUpstreamRepo != "lenaxia/k8s-mendabot" {
+		t.Errorf("MendabotUpstreamRepo default: got %q, want %q", cfg.MendabotUpstreamRepo, "lenaxia/k8s-mendabot")
+	}
+	if cfg.DisableUpstreamContributions != false {
+		t.Errorf("DisableUpstreamContributions default: got %v, want false", cfg.DisableUpstreamContributions)
+	}
+}
+
+func TestFromEnv_SelfRemediationCustom(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("SELF_REMEDIATION_MAX_DEPTH", "3")
+	t.Setenv("MENDABOT_UPSTREAM_REPO", "myorg/my-mendabot")
+	t.Setenv("MENDABOT_DISABLE_UPSTREAM_CONTRIBUTIONS", "true")
+
+	cfg, err := config.FromEnv()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.SelfRemediationMaxDepth != 3 {
+		t.Errorf("SelfRemediationMaxDepth custom: got %d, want 3", cfg.SelfRemediationMaxDepth)
+	}
+	if cfg.MendabotUpstreamRepo != "myorg/my-mendabot" {
+		t.Errorf("MendabotUpstreamRepo custom: got %q, want %q", cfg.MendabotUpstreamRepo, "myorg/my-mendabot")
+	}
+	if cfg.DisableUpstreamContributions != true {
+		t.Errorf("DisableUpstreamContributions custom: got %v, want true", cfg.DisableUpstreamContributions)
+	}
+}
+
+func TestFromEnv_SelfRemediationInvalidDepth(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("SELF_REMEDIATION_MAX_DEPTH", "abc")
+
+	_, err := config.FromEnv()
+	if err == nil {
+		t.Fatal("expected error for invalid SELF_REMEDIATION_MAX_DEPTH, got nil")
+	}
+}
+
+func TestFromEnv_SelfRemediationNegativeDepth(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("SELF_REMEDIATION_MAX_DEPTH", "-1")
+
+	_, err := config.FromEnv()
+	if err == nil {
+		t.Fatal("expected error for negative SELF_REMEDIATION_MAX_DEPTH, got nil")
+	}
+}
+
+func TestFromEnv_DisableUpstreamContributionsVariants(t *testing.T) {
+	tests := []struct {
+		envValue string
+		expected bool
+	}{
+		{"true", true},
+		{"1", true},
+		{"false", false},
+		{"0", false},
+		{"", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.envValue, func(t *testing.T) {
+			setRequiredEnv(t)
+			if tt.envValue != "" {
+				t.Setenv("MENDABOT_DISABLE_UPSTREAM_CONTRIBUTIONS", tt.envValue)
+			} else {
+				os.Unsetenv("MENDABOT_DISABLE_UPSTREAM_CONTRIBUTIONS")
+			}
+
+			cfg, err := config.FromEnv()
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if cfg.DisableUpstreamContributions != tt.expected {
+				t.Errorf("DisableUpstreamContributions for %q: got %v, want %v", tt.envValue, cfg.DisableUpstreamContributions, tt.expected)
+			}
+		})
+	}
+}

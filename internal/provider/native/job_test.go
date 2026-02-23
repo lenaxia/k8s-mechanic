@@ -11,6 +11,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	"github.com/lenaxia/k8s-mendabot/internal/config"
 	"github.com/lenaxia/k8s-mendabot/internal/domain"
 )
 
@@ -29,11 +30,20 @@ func newExhaustedJob(name, namespace string, failedCount int32) *batchv1.Job {
 	}
 }
 
+// newTestConfig returns a minimal config for testing.
+func newTestConfig() config.Config {
+	return config.Config{
+		SelfRemediationMaxDepth:      2,
+		MendabotUpstreamRepo:         "lenaxia/k8s-mendabot",
+		DisableUpstreamContributions: false,
+	}
+}
+
 // TestJobProviderName_IsNative verifies ProviderName() returns "native".
 func TestJobProviderName_IsNative(t *testing.T) {
 	s := newTestScheme()
 	c := fake.NewClientBuilder().WithScheme(s).Build()
-	p := NewJobProvider(c)
+	p := NewJobProvider(c, newTestConfig())
 
 	got := p.ProviderName()
 	if got != "native" {
@@ -45,7 +55,7 @@ func TestJobProviderName_IsNative(t *testing.T) {
 func TestJobObjectType_IsJob(t *testing.T) {
 	s := newTestScheme()
 	c := fake.NewClientBuilder().WithScheme(s).Build()
-	p := NewJobProvider(c)
+	p := NewJobProvider(c, newTestConfig())
 
 	obj := p.ObjectType()
 	if _, ok := obj.(*batchv1.Job); !ok {
@@ -57,7 +67,7 @@ func TestJobObjectType_IsJob(t *testing.T) {
 func TestHealthyJob_ReturnsNil(t *testing.T) {
 	s := newTestScheme()
 	c := fake.NewClientBuilder().WithScheme(s).Build()
-	p := NewJobProvider(c)
+	p := NewJobProvider(c, newTestConfig())
 
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{Name: "my-job", Namespace: "default"},
@@ -80,7 +90,7 @@ func TestHealthyJob_ReturnsNil(t *testing.T) {
 func TestSucceededJob_ReturnsNil(t *testing.T) {
 	s := newTestScheme()
 	c := fake.NewClientBuilder().WithScheme(s).Build()
-	p := NewJobProvider(c)
+	p := NewJobProvider(c, newTestConfig())
 
 	now := metav1.NewTime(time.Now())
 	job := &batchv1.Job{
@@ -104,7 +114,7 @@ func TestSucceededJob_ReturnsNil(t *testing.T) {
 func TestFailedJobNoActive_Detected(t *testing.T) {
 	s := newTestScheme()
 	c := fake.NewClientBuilder().WithScheme(s).Build()
-	p := NewJobProvider(c)
+	p := NewJobProvider(c, newTestConfig())
 
 	job := newExhaustedJob("my-job", "default", 3)
 
@@ -131,7 +141,7 @@ func TestFailedJobNoActive_Detected(t *testing.T) {
 func TestCronJobOwned_ReturnsNil(t *testing.T) {
 	s := newTestScheme()
 	c := fake.NewClientBuilder().WithScheme(s).Build()
-	p := NewJobProvider(c)
+	p := NewJobProvider(c, newTestConfig())
 
 	job := newExhaustedJob("cronjob-run-1", "default", 2)
 	job.OwnerReferences = []metav1.OwnerReference{
@@ -151,7 +161,7 @@ func TestCronJobOwned_ReturnsNil(t *testing.T) {
 func TestFailedWithActiveStillRunning_ReturnsNil(t *testing.T) {
 	s := newTestScheme()
 	c := fake.NewClientBuilder().WithScheme(s).Build()
-	p := NewJobProvider(c)
+	p := NewJobProvider(c, newTestConfig())
 
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{Name: "my-job", Namespace: "default"},
@@ -174,7 +184,7 @@ func TestFailedWithActiveStillRunning_ReturnsNil(t *testing.T) {
 func TestCompletedSuccessfully_ReturnsNil(t *testing.T) {
 	s := newTestScheme()
 	c := fake.NewClientBuilder().WithScheme(s).Build()
-	p := NewJobProvider(c)
+	p := NewJobProvider(c, newTestConfig())
 
 	now := metav1.NewTime(time.Now())
 	job := &batchv1.Job{
@@ -200,7 +210,7 @@ func TestCompletedSuccessfully_ReturnsNil(t *testing.T) {
 func TestZeroFailedZeroActive_ReturnsNil(t *testing.T) {
 	s := newTestScheme()
 	c := fake.NewClientBuilder().WithScheme(s).Build()
-	p := NewJobProvider(c)
+	p := NewJobProvider(c, newTestConfig())
 
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{Name: "my-job", Namespace: "default"},
@@ -223,7 +233,7 @@ func TestZeroFailedZeroActive_ReturnsNil(t *testing.T) {
 func TestSuspendedJob_ReturnsNil(t *testing.T) {
 	s := newTestScheme()
 	c := fake.NewClientBuilder().WithScheme(s).Build()
-	p := NewJobProvider(c)
+	p := NewJobProvider(c, newTestConfig())
 
 	job := newExhaustedJob("my-job", "default", 2)
 	job.Status.Conditions = []batchv1.JobCondition{
@@ -246,7 +256,7 @@ func TestSuspendedJob_ReturnsNil(t *testing.T) {
 func TestJobWrongType_ReturnsError(t *testing.T) {
 	s := newTestScheme()
 	c := fake.NewClientBuilder().WithScheme(s).Build()
-	p := NewJobProvider(c)
+	p := NewJobProvider(c, newTestConfig())
 
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: "my-pod", Namespace: "default"},
@@ -264,7 +274,7 @@ func TestJobWrongType_ReturnsError(t *testing.T) {
 func TestJobFindingErrors_IsValidJSON(t *testing.T) {
 	s := newTestScheme()
 	c := fake.NewClientBuilder().WithScheme(s).Build()
-	p := NewJobProvider(c)
+	p := NewJobProvider(c, newTestConfig())
 
 	job := newExhaustedJob("my-job", "default", 3)
 
@@ -291,7 +301,7 @@ func TestJobFindingErrors_IsValidJSON(t *testing.T) {
 func TestJobErrorText_IncludesFailureCount(t *testing.T) {
 	s := newTestScheme()
 	c := fake.NewClientBuilder().WithScheme(s).Build()
-	p := NewJobProvider(c)
+	p := NewJobProvider(c, newTestConfig())
 
 	job := newExhaustedJob("my-job", "default", 5)
 
@@ -311,7 +321,7 @@ func TestJobErrorText_IncludesFailureCount(t *testing.T) {
 func TestJobSourceRef_IsBatchV1(t *testing.T) {
 	s := newTestScheme()
 	c := fake.NewClientBuilder().WithScheme(s).Build()
-	p := NewJobProvider(c)
+	p := NewJobProvider(c, newTestConfig())
 
 	job := newExhaustedJob("my-job", "production", 3)
 
@@ -339,7 +349,7 @@ func TestJobSourceRef_IsBatchV1(t *testing.T) {
 func TestJobStandaloneParentObject(t *testing.T) {
 	s := newTestScheme()
 	c := fake.NewClientBuilder().WithScheme(s).Build()
-	p := NewJobProvider(c)
+	p := NewJobProvider(c, newTestConfig())
 
 	job := newExhaustedJob("my-job", "default", 3)
 	job.OwnerReferences = nil
@@ -363,7 +373,7 @@ func TestJobStandaloneParentObject(t *testing.T) {
 func TestJobFailedWithConditionReason(t *testing.T) {
 	s := newTestScheme()
 	c := fake.NewClientBuilder().WithScheme(s).Build()
-	p := NewJobProvider(c)
+	p := NewJobProvider(c, newTestConfig())
 
 	job := newExhaustedJob("my-job", "default", 3)
 	job.Status.Conditions = []batchv1.JobCondition{
@@ -391,7 +401,7 @@ func TestJobFailedWithConditionReason(t *testing.T) {
 func TestJobErrorText_Format(t *testing.T) {
 	s := newTestScheme()
 	c := fake.NewClientBuilder().WithScheme(s).Build()
-	p := NewJobProvider(c)
+	p := NewJobProvider(c, newTestConfig())
 
 	job := newExhaustedJob("my-job", "default", 4)
 

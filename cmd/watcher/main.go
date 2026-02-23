@@ -100,7 +100,7 @@ func main() {
 		native.NewPVCProvider(nativeClient),
 		native.NewNodeProvider(nativeClient),
 		native.NewStatefulSetProvider(nativeClient),
-		native.NewJobProvider(nativeClient),
+		native.NewJobProvider(nativeClient, cfg),
 	}
 	for _, p := range enabledProviders {
 		if err := (&provider.SourceProviderReconciler{

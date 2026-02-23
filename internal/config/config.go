@@ -10,16 +10,19 @@ import (
 // Config holds all runtime configuration for the mendabot-watcher controller.
 // All fields are populated from environment variables at startup via FromEnv.
 type Config struct {
-	GitOpsRepo               string        // GITOPS_REPO — required
-	GitOpsManifestRoot       string        // GITOPS_MANIFEST_ROOT — required
-	AgentImage               string        // AGENT_IMAGE — required
-	AgentNamespace           string        // AGENT_NAMESPACE — required; must equal watcher namespace
-	AgentSA                  string        // AGENT_SA — required
-	SinkType                 string        // SINK_TYPE — default "github"
-	LogLevel                 string        // LOG_LEVEL — default "info"
-	MaxConcurrentJobs        int           // MAX_CONCURRENT_JOBS — default 3
-	RemediationJobTTLSeconds int           // REMEDIATION_JOB_TTL_SECONDS — default 604800 (7 days)
-	StabilisationWindow      time.Duration // STABILISATION_WINDOW_SECONDS — default 120s; 0 disables
+	GitOpsRepo                   string        // GITOPS_REPO — required
+	GitOpsManifestRoot           string        // GITOPS_MANIFEST_ROOT — required
+	AgentImage                   string        // AGENT_IMAGE — required
+	AgentNamespace               string        // AGENT_NAMESPACE — required; must equal watcher namespace
+	AgentSA                      string        // AGENT_SA — required
+	SinkType                     string        // SINK_TYPE — default "github"
+	LogLevel                     string        // LOG_LEVEL — default "info"
+	MaxConcurrentJobs            int           // MAX_CONCURRENT_JOBS — default 3
+	RemediationJobTTLSeconds     int           // REMEDIATION_JOB_TTL_SECONDS — default 604800 (7 days)
+	StabilisationWindow          time.Duration // STABILISATION_WINDOW_SECONDS — default 120s; 0 disables
+	SelfRemediationMaxDepth      int           // SELF_REMEDIATION_MAX_DEPTH — default 2
+	MendabotUpstreamRepo         string        // MENDABOT_UPSTREAM_REPO — default "lenaxia/k8s-mendabot"
+	DisableUpstreamContributions bool          // MENDABOT_DISABLE_UPSTREAM_CONTRIBUTIONS — default false
 }
 
 // FromEnv reads configuration from environment variables and returns a Config.
@@ -96,6 +99,37 @@ func FromEnv() (Config, error) {
 			return Config{}, fmt.Errorf("STABILISATION_WINDOW_SECONDS must be >= 0, got %d", n)
 		}
 		cfg.StabilisationWindow = time.Duration(n) * time.Second
+	}
+
+	// Self-remediation configuration
+	depthStr := os.Getenv("SELF_REMEDIATION_MAX_DEPTH")
+	if depthStr == "" {
+		cfg.SelfRemediationMaxDepth = 2
+	} else {
+		n, err := strconv.Atoi(depthStr)
+		if err != nil {
+			return Config{}, fmt.Errorf("SELF_REMEDIATION_MAX_DEPTH must be an integer: %w", err)
+		}
+		if n < 0 {
+			return Config{}, fmt.Errorf("SELF_REMEDIATION_MAX_DEPTH must be >= 0, got %d", n)
+		}
+		cfg.SelfRemediationMaxDepth = n
+	}
+
+	// Upstream repository configuration
+	upstreamRepo := os.Getenv("MENDABOT_UPSTREAM_REPO")
+	if upstreamRepo == "" {
+		cfg.MendabotUpstreamRepo = "lenaxia/k8s-mendabot"
+	} else {
+		cfg.MendabotUpstreamRepo = upstreamRepo
+	}
+
+	// Disable upstream contributions
+	disableUpstream := os.Getenv("MENDABOT_DISABLE_UPSTREAM_CONTRIBUTIONS")
+	if disableUpstream == "true" || disableUpstream == "1" {
+		cfg.DisableUpstreamContributions = true
+	} else {
+		cfg.DisableUpstreamContributions = false
 	}
 
 	return cfg, nil

@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/lenaxia/k8s-mendabot/internal/config"
 	"github.com/lenaxia/k8s-mendabot/internal/domain"
 )
 
@@ -17,14 +19,15 @@ var _ domain.SourceProvider = (*jobProvider)(nil)
 
 type jobProvider struct {
 	client client.Client
+	cfg    config.Config
 }
 
 // NewJobProvider constructs a jobProvider. Panics if c is nil.
-func NewJobProvider(c client.Client) domain.SourceProvider {
+func NewJobProvider(c client.Client, cfg config.Config) domain.SourceProvider {
 	if c == nil {
 		panic("NewJobProvider: client must not be nil")
 	}
-	return &jobProvider{client: c}
+	return &jobProvider{client: c, cfg: cfg}
 }
 
 // ProviderName returns the stable identifier for this provider.
@@ -35,7 +38,7 @@ func (p *jobProvider) ObjectType() client.Object { return &batchv1.Job{} }
 
 // ExtractFinding converts a watched Job into a Finding.
 // Returns (nil, nil) if the job is healthy, still running, succeeded, suspended,
-// or owned by a CronJob.
+// owned by a CronJob, or exceeds self-remediation depth limit.
 // Returns (nil, err) if obj is not a *batchv1.Job.
 func (p *jobProvider) ExtractFinding(obj client.Object) (*domain.Finding, error) {
 	job, ok := obj.(*batchv1.Job)
@@ -67,6 +70,30 @@ func (p *jobProvider) ExtractFinding(obj client.Object) (*domain.Finding, error)
 		return nil, nil
 	}
 
+	// Check if this is a mendabot job (self-remediation detection)
+	isMendabotJob := false
+	chainDepth := 0
+	if job.Labels != nil && job.Labels["app.kubernetes.io/managed-by"] == "mendabot-watcher" {
+		isMendabotJob = true
+
+		// Check chain depth from annotations
+		if job.Annotations != nil {
+			if depthStr, ok := job.Annotations["remediation.mendabot.io/chain-depth"]; ok {
+				if depth, err := strconv.Atoi(depthStr); err == nil {
+					chainDepth = depth
+				}
+			}
+		}
+
+		// Increment chain depth for self-remediation
+		chainDepth++
+
+		// Check if we've exceeded max depth
+		if chainDepth > p.cfg.SelfRemediationMaxDepth {
+			return nil, nil
+		}
+	}
+
 	type errorEntry struct {
 		Text string `json:"text"`
 	}
@@ -95,7 +122,7 @@ func (p *jobProvider) ExtractFinding(obj client.Object) (*domain.Finding, error)
 
 	parent := getParent(context.Background(), p.client, job.ObjectMeta, "Job")
 
-	return &domain.Finding{
+	finding := &domain.Finding{
 		Kind:         "Job",
 		Name:         job.Name,
 		Namespace:    job.Namespace,
@@ -107,5 +134,20 @@ func (p *jobProvider) ExtractFinding(obj client.Object) (*domain.Finding, error)
 			Name:       job.Name,
 			Namespace:  job.Namespace,
 		},
-	}, nil
+		IsSelfRemediation: isMendabotJob,
+		ChainDepth:        chainDepth,
+	}
+
+	// For self-remediations, add context about mendabot failure
+	if isMendabotJob {
+		finding.Details = fmt.Sprintf("Mendabot agent job failed (chain depth: %d). This may indicate a bug in mendabot itself or a transient issue.", chainDepth)
+
+		// Set target repo for upstream contributions if enabled
+		if !p.cfg.DisableUpstreamContributions && chainDepth >= 2 {
+			// At depth 2+, we're analyzing why mendabot failed, which might be a mendabot bug
+			finding.TargetRepoOverride = p.cfg.MendabotUpstreamRepo
+		}
+	}
+
+	return finding, nil
 }

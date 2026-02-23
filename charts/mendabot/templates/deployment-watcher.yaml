@@ -1,0 +1,93 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "mendabot.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "mendabot.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "mendabot.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "mendabot.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "mendabot.watcherSAName" . }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: watcher
+        image: {{ include "mendabot.watcherImage" . }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        env:
+        - name: GITOPS_REPO
+          value: {{ required "gitops.repo is required" .Values.gitops.repo | quote }}
+        - name: GITOPS_MANIFEST_ROOT
+          value: {{ required "gitops.manifestRoot is required" .Values.gitops.manifestRoot | quote }}
+        - name: AGENT_IMAGE
+          value: {{ include "mendabot.agentImage" . | quote }}
+        - name: AGENT_NAMESPACE
+          value: {{ .Release.Namespace | quote }}
+        - name: AGENT_SA
+          value: {{ include "mendabot.agentSAName" . | quote }}
+        - name: SINK_TYPE
+          value: {{ .Values.watcher.sinkType | quote }}
+        - name: LOG_LEVEL
+          value: {{ .Values.watcher.logLevel | quote }}
+        - name: MAX_CONCURRENT_JOBS
+          value: {{ .Values.watcher.maxConcurrentJobs | quote }}
+        - name: REMEDIATION_JOB_TTL_SECONDS
+          value: {{ .Values.watcher.remediationJobTTLSeconds | quote }}
+        - name: STABILISATION_WINDOW_SECONDS
+          value: {{ .Values.watcher.stabilisationWindowSeconds | quote }}
+        - name: SELF_REMEDIATION_MAX_DEPTH
+          value: {{ .Values.selfRemediation.maxDepth | quote }}
+        - name: SELF_REMEDIATION_COOLDOWN_SECONDS
+          value: {{ .Values.selfRemediation.cooldownSeconds | quote }}
+        - name: MENDABOT_UPSTREAM_REPO
+          value: {{ .Values.selfRemediation.upstreamRepo | quote }}
+        - name: MENDABOT_DISABLE_UPSTREAM_CONTRIBUTIONS
+          value: {{ .Values.selfRemediation.disableUpstreamContributions | quote }}
+        - name: DISABLE_CASCADE_CHECK
+          value: {{ .Values.selfRemediation.disableCascadeCheck | quote }}
+        - name: CASCADE_NAMESPACE_THRESHOLD
+          value: {{ .Values.selfRemediation.cascadeNamespaceThreshold | quote }}
+        - name: CASCADE_NODE_CACHE_TTL_SECONDS
+          value: {{ .Values.selfRemediation.cascadeNodeCacheTTLSeconds | quote }}
+        ports:
+        - name: metrics
+          containerPort: 8080
+          protocol: TCP
+        - name: healthz
+          containerPort: 8081
+          protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8081
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]

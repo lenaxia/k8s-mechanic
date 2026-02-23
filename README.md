@@ -179,58 +179,91 @@ data:
 The private key is used only in the agent Job's init container to exchange a short-lived
 installation token (1-hour TTL). It is never injected into the main agent container.
 
-## Deployment
+## Quick Start
 
-```bash
-# Clone this repo
-git clone https://github.com/lenaxia/k8s-mendabot
+### Prerequisites
 
-# Fill in secret placeholders
-cp deploy/kustomize/secret-github-app.yaml.example deploy/kustomize/secret-github-app.yaml
-cp deploy/kustomize/secret-llm.yaml.example deploy/kustomize/secret-llm.yaml
-# Edit both files with your real values
+- Kubernetes >= 1.28
+- Helm >= 3.14
+- A GitHub App installed on your GitOps repository with: Contents (write), Pull Requests (write), Issues (write)
+- An OpenAI-compatible LLM API key
 
-# Apply
+### 1. Create required Secrets
+
+```sh
+kubectl create namespace mendabot
+
+kubectl create secret generic github-app \
+  --namespace mendabot \
+  --from-literal=app-id=<your-app-id> \
+  --from-literal=installation-id=<your-installation-id> \
+  --from-file=private-key=<path-to-private-key.pem>
+
+kubectl create secret generic llm-credentials \
+  --namespace mendabot \
+  --from-literal=api-key=<your-llm-api-key> \
+  --from-literal=base-url=https://api.openai.com/v1 \
+  --from-literal=model=gpt-4o \
+  --from-literal=kube-api-server=https://<your-cluster-api-server>:6443
+```
+
+### 2. Install with Helm
+
+```sh
+helm install mendabot charts/mendabot/ \
+  --namespace mendabot \
+  --set gitops.repo=myorg/my-gitops-repo \
+  --set gitops.manifestRoot=kubernetes
+```
+
+### 3. Verify
+
+```sh
+kubectl get deployment -n mendabot
+kubectl get rjob -n mendabot
+```
+
+### Kustomize (alternative)
+
+Raw manifests are available in `deploy/kustomize/` for operators who prefer Kustomize:
+
+```sh
 kubectl apply -k deploy/kustomize/
 ```
 
-## Configuration
+Note: the Kustomize path requires manually creating both Secrets and does not include
+automatic CRD upgrade on `kubectl apply -k`. Use the Helm path for production deployments.
 
-All configuration is via environment variables on the watcher Deployment.
-Required variables must be set or the watcher will fail to start.
+## Helm Configuration Reference
 
-### Required
+All `values.yaml` keys and their defaults:
 
-| Variable | Description |
-|---|---|
-| `GITOPS_REPO` | GitHub repository in `owner/repo` format |
-| `GITOPS_MANIFEST_ROOT` | Path within the cloned repo to the manifests root |
-| `AGENT_IMAGE` | Full image reference for the agent container (e.g. `ghcr.io/lenaxia/mendabot-agent:latest`) |
-| `AGENT_NAMESPACE` | Namespace where agent Jobs are created (must match the watcher's own namespace) |
-| `AGENT_SA` | ServiceAccount name for agent Jobs |
-
-### Optional
-
-| Variable | Default | Description |
+| Key | Default | Description |
 |---|---|---|
-| `STABILISATION_WINDOW_SECONDS` | `120` | Seconds a finding must persist before a Job is dispatched; `0` disables the window |
-| `MAX_CONCURRENT_JOBS` | `3` | Maximum simultaneously running agent Jobs |
-| `REMEDIATION_JOB_TTL_SECONDS` | `604800` | Seconds after which a `Succeeded` RemediationJob is deleted (default: 7 days) |
-| `SINK_TYPE` | `github` | Sink implementation for the agent to use |
-| `LOG_LEVEL` | `info` | Log verbosity: `debug`, `info`, `warn`, `error` |
- | `SELF_REMEDIATION_MAX_DEPTH` | `2` | Maximum chain depth for self-remediation cascades (0 = disable, max: 10) |
- | `SELF_REMEDIATION_COOLDOWN_SECONDS` | `300` | Cooldown period between self-remediations in seconds (max: 3600) |
-
-### Secrets
-
-| Secret | Key | Description |
-|---|---|---|
-| `secret-github-app` | `app-id` | GitHub App ID |
-| `secret-github-app` | `installation-id` | GitHub App installation ID |
-| `secret-github-app` | `private-key` | PEM-encoded RSA private key |
-| `secret-llm` | `api-key` | LLM API key |
-| `secret-llm` | `base-url` | LLM API base URL (optional; for non-OpenAI endpoints) |
-| `secret-llm` | `model` | LLM model name (optional) |
+| `image.repository` | `ghcr.io/lenaxia/mendabot-watcher` | Watcher image repository |
+| `image.tag` | `""` (uses `Chart.appVersion`) | Watcher image tag |
+| `image.pullPolicy` | `IfNotPresent` | Image pull policy |
+| `agent.image.repository` | `ghcr.io/lenaxia/mendabot-agent` | Agent image repository |
+| `agent.image.tag` | `""` (uses `Chart.appVersion`) | Agent image tag |
+| `gitops.repo` | **required** | GitOps repository in `org/repo` format |
+| `gitops.manifestRoot` | **required** | Path within repo to manifests root |
+| `watcher.stabilisationWindowSeconds` | `120` | Seconds a finding must persist before dispatching |
+| `watcher.maxConcurrentJobs` | `3` | Maximum simultaneous agent Jobs |
+| `watcher.remediationJobTTLSeconds` | `604800` | TTL for completed RemediationJob objects (7 days) |
+| `watcher.sinkType` | `github` | Sink type for PR creation |
+| `watcher.logLevel` | `info` | Log level: debug, info, warn, error |
+| `selfRemediation.maxDepth` | `2` | Max self-remediation chain depth; `0` disables |
+| `selfRemediation.upstreamRepo` | `lenaxia/k8s-mendabot` | Upstream repo for bug-fix PRs |
+| `selfRemediation.disableUpstreamContributions` | `false` | Prevent PRs to upstream mendabot repo |
+| `prompt.name` | `default` | Built-in prompt to use (`files/prompts/<name>.txt`) |
+| `prompt.override` | `""` | Full prompt content override (takes precedence over `prompt.name`) |
+| `rbac.create` | `true` | Create RBAC resources |
+| `createNamespace` | `false` | Create `Release.Namespace` if it does not exist |
+| `metrics.enabled` | `false` | Expose metrics Service on port 8080 |
+| `metrics.serviceMonitor.enabled` | `false` | Create Prometheus Operator ServiceMonitor |
+| `metrics.serviceMonitor.interval` | `30s` | Prometheus scrape interval |
+| `metrics.serviceMonitor.scrapeTimeout` | `10s` | Prometheus scrape timeout |
+| `metrics.serviceMonitor.labels` | `{}` | Additional labels for the ServiceMonitor |
 
 ### Configuration Validation
 

@@ -1,0 +1,30 @@
+mendabot has been installed in namespace {{ .Release.Namespace }}.
+
+Verify the watcher is running:
+  kubectl get deployment -n {{ .Release.Namespace }} {{ include "mendabot.fullname" . }}
+  kubectl get rjob -n {{ .Release.Namespace }}
+
+REQUIRED: Create the following Secrets before the watcher can function.
+The key names below are hardcoded in the mendabot jobbuilder — do not change them.
+
+1. GitHub App credentials (Secret name: {{ .Values.secrets.githubApp.name }}):
+   kubectl create secret generic {{ .Values.secrets.githubApp.name }} \
+     --namespace {{ .Release.Namespace }} \
+     --from-literal=app-id=<your-app-id> \
+     --from-literal=installation-id=<your-installation-id> \
+     --from-file=private-key=<path-to-private-key.pem>
+
+2. LLM + cluster credentials (Secret name: {{ .Values.secrets.llm.name }}):
+   kubectl create secret generic {{ .Values.secrets.llm.name }} \
+     --namespace {{ .Release.Namespace }} \
+     --from-literal=api-key=<your-llm-api-key> \
+     --from-literal=base-url=<your-llm-base-url> \
+     --from-literal=model=<your-model-name> \
+     --from-literal=kube-api-server=https://<your-cluster-api-server>:6443
+{{- if .Values.metrics.serviceMonitor.enabled }}
+
+NOTE: ServiceMonitor is enabled. Ensure Prometheus Operator is installed in your
+cluster, otherwise the ServiceMonitor resource will be ignored.
+{{- end }}
+
+For documentation see https://github.com/lenaxia/k8s-mendabot

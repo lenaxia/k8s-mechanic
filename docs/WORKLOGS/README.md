@@ -55,3 +55,6 @@ else.
 | [0033](0033_2026-02-22_epic09-native-provider-complete.md) | 2026-02-22 | Epic 09 complete: all 12 stories, 6 native providers, k8sgpt removed, code review 0 gaps | Complete |
 | [0034](0034_2026-02-23_epic09-merge-and-release.md) | 2026-02-23 | Epic 09 merge: skeptical review, 5 gaps fixed, merge-readiness blockers resolved, v0.3.0 tagged | Complete |
 | [0035](0035_2026-02-23_cascade-prevention-complete.md) | 2026-02-23 | Comprehensive cascade prevention system: circuit breaker, chain depth tracking, cascade checker, metrics, integration | Complete |
+| [0036](0036_2026-02-23_helm-chart-design.md) | 2026-02-23 | README overhaul + Helm chart architecture design | Complete |
+| [0037](0037_2026-02-23_epic10-helm-chart-planning.md) | 2026-02-23 | Epic 10 Helm chart: design decisions, backlog created, 4 gaps found and fixed | Complete |
+| [0038](0038_2026-02-23_epic10-helm-chart-implementation.md) | 2026-02-23 | Epic 10 Helm chart: all 13 stories implemented, helm lint passes, CI workflow added | Complete |

@@ -867,6 +867,7 @@ kubectl apply -k deploy/kustomize/
 | Branch | Purpose | Status | Created |
 |--------|---------|--------|---------|
 | `main` | Stable code | Active | 2026-02-19 |
+| `feature/epic10-helm-chart` | Helm chart packaging | Active | 2026-02-23 |
 
 **Merged branches:**
 

@@ -1,6 +1,66 @@
 package domain
 
-import "sigs.k8s.io/controller-runtime/pkg/client"
+import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
+	"sort"
+
+	"sigs.k8s.io/controller-runtime/pkg/client"
+)
+
+// FindingFingerprint computes the deduplication key for a Finding.
+// It is a pure function — the same input always produces the same output.
+//
+// Algorithm:
+//  1. Parse f.Errors (pre-serialised JSON) into []struct{ Text string }.
+//     An empty string or "[]" are treated identically (zero texts).
+//  2. Extract the Text field from each element and sort the resulting slice.
+//  3. Build a payload struct containing Namespace, Kind, ParentObject, and
+//     the sorted texts.
+//  4. JSON-encode the payload with SetEscapeHTML(false) to avoid mangling
+//     "<", ">", and "&" characters inside error texts.
+//  5. Return the lowercase hex SHA256 of the encoded bytes (always 64 chars).
+//
+// Returns an error only if f.Errors is non-empty and not valid JSON, or if
+// json.Encode fails (extremely unlikely in practice).
+func FindingFingerprint(f *Finding) (string, error) {
+	var failures []struct {
+		Text string `json:"text"`
+	}
+	if f.Errors != "" {
+		if err := json.Unmarshal([]byte(f.Errors), &failures); err != nil {
+			return "", fmt.Errorf("FindingFingerprint: malformed errors JSON: %w", err)
+		}
+	}
+
+	texts := make([]string, 0, len(failures))
+	for _, fv := range failures {
+		texts = append(texts, fv.Text)
+	}
+	sort.Strings(texts)
+
+	payload := struct {
+		Namespace    string   `json:"namespace"`
+		Kind         string   `json:"kind"`
+		ParentObject string   `json:"parentObject"`
+		ErrorTexts   []string `json:"errorTexts"`
+	}{
+		Namespace:    f.Namespace,
+		Kind:         f.Kind,
+		ParentObject: f.ParentObject,
+		ErrorTexts:   texts,
+	}
+
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(payload); err != nil {
+		return "", fmt.Errorf("FindingFingerprint: json.Encode failed: %w", err)
+	}
+	return fmt.Sprintf("%x", sha256.Sum256(buf.Bytes())), nil
+}
 
 // SourceProvider is implemented by any component that watches an external resource
 // and can produce a normalised Finding from it.

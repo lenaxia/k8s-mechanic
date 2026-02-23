@@ -50,7 +50,7 @@ a feature is approved for implementation:
 | FT-A3 | Severity tiers on findings | ★★ | ● | Evaluated |
 | FT-A4 | Cascading failure root-cause detection | ★★★ | ●●● | Planned (epic11) |
 | FT-A5 | Recurrence memory — reuse prior fix context | ★★★ | ●● | Evaluated |
-| FT-A6 | Multi-signal correlation (related findings) | ★★★ | ●●● | Evaluated |
+| FT-A6 | Multi-signal correlation (related findings) | ★★★ | ●●● | Planned (epic13) |
 | FT-A7 | GitOps drift detection source provider | ★★★ | ●● | Evaluated |
 | FT-A8 | False-positive feedback annotation | ★★★ | ●● | Evaluated |
 | FT-A9 | Mandatory pre-PR manifest validation | ★★★ | ● | Evaluated |

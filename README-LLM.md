@@ -226,7 +226,9 @@ k8s-mendabot/
 │   │   ├── epic04-deploy/
 │   │   ├── epic05-prompt/
 │   │   ├── epic06-ci-cd/
-│   │   └── epic07-technical-debt/
+│   │   ├── epic11-self-remediation-cascade/
+│   │   ├── epic12-security-review/
+│   │   └── epic13-multi-signal-correlation/
 │   └── WORKLOGS/
 │       └── README.md
 │

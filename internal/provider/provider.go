@@ -107,6 +107,22 @@ func (r *SourceProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, nil
 	}
 
+	if domain.DetectInjection(finding.Errors) {
+		if r.Log != nil {
+			r.Log.Warn("potential prompt injection detected in finding errors",
+				zap.Bool("audit", true),
+				zap.String("event", "finding.injection_detected"),
+				zap.String("provider", r.Provider.ProviderName()),
+				zap.String("kind", finding.Kind),
+				zap.String("namespace", finding.Namespace),
+				zap.String("name", finding.Name),
+			)
+		}
+		if r.Cfg.InjectionDetectionAction == "suppress" {
+			return ctrl.Result{}, nil
+		}
+	}
+
 	r.initCascadeOnce.Do(func() {
 		cascadeCfg := cascade.Config{
 			Enabled:                 !r.Cfg.DisableCascadeCheck,

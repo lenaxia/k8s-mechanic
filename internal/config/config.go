@@ -25,6 +25,7 @@ type Config struct {
 	DisableCascadeCheck       bool          // DISABLE_CASCADE_CHECK — default false
 	CascadeNamespaceThreshold int           // CASCADE_NAMESPACE_THRESHOLD — default 50
 	CascadeNodeCacheTTL       time.Duration // CASCADE_NODE_CACHE_TTL_SECONDS — default 30s
+	InjectionDetectionAction  string        // INJECTION_DETECTION_ACTION — "log" (default) or "suppress"
 }
 
 // FromEnv reads configuration from environment variables and returns a Config.
@@ -176,6 +177,15 @@ func FromEnv() (Config, error) {
 		}
 		cfg.CascadeNodeCacheTTL = time.Duration(n) * time.Second
 	}
+
+	action := os.Getenv("INJECTION_DETECTION_ACTION")
+	if action == "" {
+		action = "log"
+	}
+	if action != "log" && action != "suppress" {
+		return Config{}, fmt.Errorf("INJECTION_DETECTION_ACTION must be 'log' or 'suppress', got %q", action)
+	}
+	cfg.InjectionDetectionAction = action
 
 	return cfg, nil
 }

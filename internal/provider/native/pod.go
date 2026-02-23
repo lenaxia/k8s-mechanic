@@ -147,9 +147,7 @@ func buildWaitingText(cs corev1.ContainerStatus) string {
 	reason := cs.State.Waiting.Reason
 	msg := cs.State.Waiting.Message
 	if msg != "" {
-		if len(msg) > 500 {
-			msg = msg[:500] + "...[truncated]"
-		}
+		msg = truncate(msg, 500)
 		msg = domain.RedactSecrets(msg)
 		return fmt.Sprintf("container %s: %s: %s", cs.Name, reason, msg)
 	}

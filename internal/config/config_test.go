@@ -869,6 +869,59 @@ func TestFromEnv_BoundaryConditionValidation(t *testing.T) {
 	}
 }
 
+// TestFromEnv_InjectionDetectionActionDefault tests that unset INJECTION_DETECTION_ACTION defaults to "log"
+func TestFromEnv_InjectionDetectionActionDefault(t *testing.T) {
+	setRequiredEnv(t)
+	os.Unsetenv("INJECTION_DETECTION_ACTION")
+
+	cfg, err := config.FromEnv()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.InjectionDetectionAction != "log" {
+		t.Errorf("InjectionDetectionAction default: got %q, want %q", cfg.InjectionDetectionAction, "log")
+	}
+}
+
+// TestFromEnv_InjectionDetectionActionLog tests INJECTION_DETECTION_ACTION=log
+func TestFromEnv_InjectionDetectionActionLog(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("INJECTION_DETECTION_ACTION", "log")
+
+	cfg, err := config.FromEnv()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.InjectionDetectionAction != "log" {
+		t.Errorf("InjectionDetectionAction: got %q, want %q", cfg.InjectionDetectionAction, "log")
+	}
+}
+
+// TestFromEnv_InjectionDetectionActionSuppress tests INJECTION_DETECTION_ACTION=suppress
+func TestFromEnv_InjectionDetectionActionSuppress(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("INJECTION_DETECTION_ACTION", "suppress")
+
+	cfg, err := config.FromEnv()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.InjectionDetectionAction != "suppress" {
+		t.Errorf("InjectionDetectionAction: got %q, want %q", cfg.InjectionDetectionAction, "suppress")
+	}
+}
+
+// TestFromEnv_InjectionDetectionActionInvalid tests that an invalid value returns an error
+func TestFromEnv_InjectionDetectionActionInvalid(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("INJECTION_DETECTION_ACTION", "warn")
+
+	_, err := config.FromEnv()
+	if err == nil {
+		t.Fatal("expected error for INJECTION_DETECTION_ACTION=warn, got nil")
+	}
+}
+
 // TestFromEnv_ValidationSkipOption tests that validation can be skipped for testing
 func TestFromEnv_ValidationSkipOption(t *testing.T) {
 	// Test that extremely large values are rejected by default

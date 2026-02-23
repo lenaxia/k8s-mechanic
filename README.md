@@ -253,8 +253,12 @@ All `values.yaml` keys and their defaults:
 | `watcher.sinkType` | `github` | Sink type for PR creation |
 | `watcher.logLevel` | `info` | Log level: debug, info, warn, error |
 | `selfRemediation.maxDepth` | `2` | Max self-remediation chain depth; `0` disables |
+| `selfRemediation.cooldownSeconds` | `300` | Cooldown between self-remediation dispatches (seconds) |
 | `selfRemediation.upstreamRepo` | `lenaxia/k8s-mendabot` | Upstream repo for bug-fix PRs |
 | `selfRemediation.disableUpstreamContributions` | `false` | Prevent PRs to upstream mendabot repo |
+| `selfRemediation.disableCascadeCheck` | `false` | Disable infrastructure cascade failure detection |
+| `selfRemediation.cascadeNamespaceThreshold` | `50` | % of pods failing before namespace-wide suppression |
+| `selfRemediation.cascadeNodeCacheTTLSeconds` | `30` | TTL (seconds) for cascade checker node state cache |
 | `prompt.name` | `default` | Built-in prompt to use (`files/prompts/<name>.txt`) |
 | `prompt.override` | `""` | Full prompt content override (takes precedence over `prompt.name`) |
 | `rbac.create` | `true` | Create RBAC resources |

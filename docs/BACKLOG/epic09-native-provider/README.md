@@ -172,7 +172,7 @@ not gate on `sourceType`.
 |-------|------|--------|
 | Promote Fingerprint to domain function | [STORY_01_fingerprint_domain.md](STORY_01_fingerprint_domain.md) | Not Started |
 | Slim SourceProvider interface + update SourceProviderReconciler | [STORY_02_source_provider_interface.md](STORY_02_source_provider_interface.md) | Not Started |
-| getParent owner-reference traversal | [STORY_03_parent_traversal.md](STORY_03_parent_traversal.md) | Not Started |
+| getParent owner-reference traversal | [STORY_03_parent_traversal.md](STORY_03_parent_traversal.md) | Complete |
 | PodProvider | [STORY_04_pod_provider.md](STORY_04_pod_provider.md) | Not Started |
 | DeploymentProvider | [STORY_05_deployment_provider.md](STORY_05_deployment_provider.md) | Not Started |
 | PVCProvider | [STORY_06_pvc_provider.md](STORY_06_pvc_provider.md) | Not Started |

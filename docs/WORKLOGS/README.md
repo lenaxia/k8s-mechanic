@@ -15,3 +15,9 @@ else.
 - Never retroactively rewrite an entry — if something was wrong, note the correction
   in the next entry
 - Next entry number: check the highest `NNNN` in the table and add 1
+
+## Index
+
+| # | Date | Description | Status |
+|---|------|-------------|--------|
+| 0072 | 2026-02-24 | Epic 23 STORY_01 — audit log gaps fixed in provider.go | Complete |

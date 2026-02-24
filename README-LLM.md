@@ -862,7 +862,6 @@ kubectl apply -k deploy/kustomize/
 | `feature/epic11-13-deferred` | Epic 11 (cascade prevention) + Epic 13 (multi-signal correlation) — deferred | Deferred | 2026-02-23 |
 | `feature/epic12-security-remediation` | Epic 12 security gap remediation (findings 001–013) | Active | 2026-02-23 |
 | `feature/epic16-annotation-control` | Epic 16 per-resource annotation control (enabled, skip-until, priority) | Active | 2026-02-24 |
-| `feature/epic16-namespace-annotation` | Epic 16 STORY_04: namespace-level annotation gate (enabled, skip-until on Namespace objects) | Active | 2026-02-24 |
 
 **Merged branches:**
 
@@ -873,6 +872,7 @@ kubectl apply -k deploy/kustomize/
 | `feature/epic11-fixes` | Epic 11 complete: EventRecorder (3 events), 10-gap review, Grafana dashboard, alert rules | 2026-02-23 | 9a8477a |
 | `feature/epic15-namespace-filtering` | Epic 15 namespace filtering (WATCH_NAMESPACES, EXCLUDE_NAMESPACES) | 2026-02-24 | 127c08e |
 | `feature/epic21-kubernetes-events` | Epic 21: Kubernetes Events on RemediationJob (FT-U3) | 2026-02-24 | 021ac37 |
+| `feature/epic16-namespace-annotation` | Epic 16 STORY_04: namespace-level annotation gate (enabled, skip-until on Namespace objects) | 2026-02-24 | 2553638 |
 
 **Branch naming:**
 - Feature: `feature/short-description`

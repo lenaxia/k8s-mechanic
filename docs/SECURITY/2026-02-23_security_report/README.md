@@ -15,19 +15,19 @@
 
 | ID | Severity | Title | Status |
 |----|----------|-------|--------|
-| 2026-02-23-001 | MEDIUM | Go standard library vulnerabilities (govulncheck) | Open |
+| 2026-02-23-001 | MEDIUM | Go standard library vulnerabilities (govulncheck) | Remediated |
 | 2026-02-23-002 | INFO | Unhandled error in Prometheus metrics registration | Accepted |
-| 2026-02-23-003 | MEDIUM | `FINDING_DETAILS` has no injection detection or prompt envelope | Open |
+| 2026-02-23-003 | MEDIUM | `FINDING_DETAILS` has no injection detection or prompt envelope | Remediated |
 | 2026-02-23-004 | LOW | LLM config JSON built with `printf` — operator values not sanitised | Accepted |
-| 2026-02-23-005 | MEDIUM | Watcher ClusterRole grants ConfigMap write cluster-wide | Open |
-| 2026-02-23-006 | MEDIUM | Missing SHA256 checksum for yq, age, and opencode in Dockerfile.agent | Open |
-| 2026-02-23-007 | LOW | Base images not pinned to digest | Open |
-| 2026-02-23-008 | LOW | GitHub Actions not pinned to commit SHA | Open |
-| 2026-02-23-009 | LOW | Trivy CI scan only fails on CRITICAL severity | Open |
-| 2026-02-23-010 | MEDIUM | JWT Bearer token not redacted by `RedactSecrets` | Open |
-| 2026-02-23-011 | LOW | JSON-encoded credentials not redacted (`"password":"value"`) | Open |
-| 2026-02-23-012 | LOW | Redis URL with empty username not redacted | Open |
-| 2026-02-23-013 | INFO | Injection detection gap: "stop following the rules" variant | Open |
+| 2026-02-23-005 | MEDIUM | Watcher ClusterRole grants ConfigMap write cluster-wide | Remediated |
+| 2026-02-23-006 | MEDIUM | Missing SHA256 checksum for yq, age, and opencode in Dockerfile.agent | Remediated |
+| 2026-02-23-007 | LOW | Base images not pinned to digest | Remediated |
+| 2026-02-23-008 | LOW | GitHub Actions not pinned to commit SHA | Remediated |
+| 2026-02-23-009 | LOW | Trivy CI scan only fails on CRITICAL severity | Remediated |
+| 2026-02-23-010 | MEDIUM | JWT Bearer token not redacted by `RedactSecrets` | Remediated |
+| 2026-02-23-011 | LOW | JSON-encoded credentials not redacted (`"password":"value"`) | Remediated |
+| 2026-02-23-012 | LOW | Redis URL with empty username not redacted | Remediated |
+| 2026-02-23-013 | INFO | Injection detection gap: "stop following the rules" variant | Remediated |
 
 **Counts:**
 
@@ -35,10 +35,10 @@
 |----------|------|-----------|----------|---------|
 | CRITICAL | 0 | 0 | 0 | 0 |
 | HIGH | 0 | 0 | 0 | 0 |
-| MEDIUM | 4 | 0 | 0 | 0 |
-| LOW | 5 | 0 | 2 | 0 |
-| INFO | 2 | 0 | 1 | 0 |
-| **Total** | **11** | **0** | **2** | **0** |
+| MEDIUM | 0 | 4 | 0 | 0 |
+| LOW | 0 | 5 | 2 | 0 |
+| INFO | 0 | 1 | 1 | 0 |
+| **Total** | **0** | **10** | **3** | **0** |
 
 ---
 
@@ -89,9 +89,9 @@ Three new redaction gaps were identified in `domain.RedactSecrets` (JWT Bearer h
 | Risk ID | Description | Acceptance Still Valid? | Notes |
 |---------|-------------|------------------------|-------|
 | AR-01 | Agent reads all Secrets (cluster scope) | **yes** | Namespace scope mode available as opt-in mitigation |
-| AR-02 | Redaction false negatives | **yes** | New gaps found (2026-02-23-010–012); gaps documented and should be fixed |
+| AR-02 | Redaction false negatives | **yes** | Gaps 010–012 remediated; surface narrowed. Residual risk remains as novel formats are not covered |
 | AR-03 | NetworkPolicy requires CNI | **yes** | Manifests exist; CNI is operator responsibility |
-| AR-04 | Prompt injection not fully preventable | **yes** | Envelope + HARD RULE 8 + read-only RBAC mitigate; 2026-02-23-003 is a gap to close |
+| AR-04 | Prompt injection not fully preventable | **yes** | Gap 003 remediated; envelope now covers both FINDING_ERRORS and FINDING_DETAILS |
 | AR-05 | GitHub token in shared emptyDir | **yes** | Init container isolation confirmed |
 | AR-06 | HARD RULEs are prompt-only controls | **yes** | Read-only RBAC provides hard backstop |
 
@@ -106,10 +106,11 @@ Three new redaction gaps were identified in `domain.RedactSecrets` (JWT Bearer h
 ## Recommendations for Next Review
 
 1. **Cluster required** — The next review must include a running cluster with a NetworkPolicy-aware CNI (Cilium or Calico) to complete Phases 3.3, 4, 5, 6.2, and 7 live tests.
-2. **Fix MEDIUM findings before next review** — Findings 2026-02-23-001 (Go CVEs), 2026-02-23-003 (FINDING_DETAILS injection path), 2026-02-23-005 (watcher ConfigMap write), and 2026-02-23-006 (binary checksums) should be remediated.
+2. **All MEDIUM findings remediated** — No open MEDIUM findings remain. Next review should verify remediations are effective under live conditions.
 3. **Trivy scan results** — Review CI Trivy scan output for the current release to assess any HIGH CVEs in base images (deferred this cycle due to no Docker environment).
 4. **Install staticcheck** — Add `staticcheck` to the review environment or CI to close the gap from 1.1.
-5. **AR-02 surface narrowed** — After fixing 2026-02-23-010–012, re-run the redaction gap analysis to update the accepted residual risk scope.
+5. **AR-02 surface narrowed** — Findings 010–012 remediated. Redaction gap analysis should be re-run in the next review to confirm coverage and identify any remaining novel formats.
+6. **SHA256 ARG maintenance** — When upgrading yq (v4.45.1), age (v1.3.1), or opencode (v1.2.10) in `docker/Dockerfile.agent`, the six `*_SHA256_AMD64/ARM64` ARGs must be recomputed and updated.
 
 ---
 

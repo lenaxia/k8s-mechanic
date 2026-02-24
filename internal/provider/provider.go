@@ -228,6 +228,7 @@ func (r *SourceProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		if err := r.ReadinessChecker.Check(ctx); err != nil {
 			if r.Log != nil {
 				r.Log.Error("readiness check failed, suppressing RemediationJob creation",
+					zap.Bool("audit", true),
 					zap.Error(err),
 					zap.String("checker", r.ReadinessChecker.Name()),
 					zap.String("fingerprint", fp[:12]),

@@ -40,12 +40,15 @@ watcher:
   logLevel: info
   # LLM provider to use (e.g. openai, ollama)
   llmProvider: "openai"
-  # Action to take when prompt injection is detected: warn or block
-  injectionDetectionAction: "warn"
+  # Action to take when prompt injection is detected: log or suppress
+  injectionDetectionAction: "log"
   # Maximum number of investigation retries per RemediationJob
   maxInvestigationRetries: "3"
   # RBAC scope granted to the agent: cluster or namespace
   agentRBACScope: "cluster"
+  # Comma-separated list of namespaces to watch when agentRBACScope=namespace.
+  # Empty string means cluster-wide scope (safe default).
+  agentWatchNamespaces: ""
 
 # Pre-existing Secrets that must be created before helm install.
 # The chart never creates Secret content.

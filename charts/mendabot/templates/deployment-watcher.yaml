@@ -54,6 +54,8 @@ spec:
           value: {{ .Values.watcher.maxInvestigationRetries | quote }}
         - name: AGENT_RBAC_SCOPE
           value: {{ .Values.watcher.agentRBACScope | quote }}
+        - name: AGENT_WATCH_NAMESPACES
+          value: {{ .Values.watcher.agentWatchNamespaces | quote }}
         ports:
         - name: metrics
           containerPort: 8080

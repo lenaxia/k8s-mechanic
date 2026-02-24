@@ -72,7 +72,7 @@ func FindingFingerprint(f *Finding) (string, error) {
 type SourceProvider interface {
 	// ProviderName returns a stable, lowercase identifier for this provider.
 	// Used as the value of RemediationJobSpec.SourceType (e.g. "native", "prometheus").
-	// Must be unique across all registered providers.
+	// Returns the provider type identifier. Multiple providers of the same type (e.g. native Pod, Deployment) may return the same value.
 	ProviderName() string
 
 	// ObjectType returns a pointer to the runtime.Object type this provider watches.

@@ -7,9 +7,12 @@ import (
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
@@ -74,6 +77,15 @@ func main() {
 		Metrics:                 metricsserver.Options{BindAddress: ":8080"},
 		HealthProbeBindAddress:  ":8081",
 		GracefulShutdownTimeout: func() *time.Duration { d := 30 * time.Second; return &d }(),
+		Cache: cache.Options{
+			ByObject: map[client.Object]cache.ByObject{
+				&corev1.Secret{}: {
+					Namespaces: map[string]cache.Config{
+						cfg.AgentNamespace: {},
+					},
+				},
+			},
+		},
 	})
 	if err != nil {
 		log.Fatalf("unable to start manager: %v", err)

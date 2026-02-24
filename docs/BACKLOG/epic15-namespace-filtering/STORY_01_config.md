@@ -2,7 +2,7 @@
 
 **Epic:** [epic15-namespace-filtering](README.md)
 **Priority:** High
-**Status:** Not Started
+**Status:** Complete
 **Estimated Effort:** 1 hour
 
 ---
@@ -161,9 +161,9 @@ at line 250.
 - [x] `config.Config` has `WatchNamespaces []string` and `ExcludeNamespaces []string`
 - [x] `config.FromEnv` parses both env vars; both default to `nil`
 - [x] All new config tests pass with `-race`
-- [ ] Full test suite passes: `go test -timeout 120s -race ./...`
-- [ ] `go vet ./...` clean
-- [ ] `go build ./...` clean
+- [x] Full test suite passes: `go test -timeout 120s -race ./...`
+- [x] `go vet ./...` clean
+- [x] `go build ./...` clean
 - [x] `charts/mendabot/templates/deployment-watcher.yaml` has two commented-out env var entries:
   ```yaml
   # - name: WATCH_NAMESPACES

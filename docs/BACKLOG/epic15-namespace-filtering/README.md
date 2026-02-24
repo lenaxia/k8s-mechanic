@@ -14,7 +14,7 @@ Without this, mendabot triggers investigations for every cert-manager certificat
 Flux reconciliation backoff, or monitoring stack restart — high-volume transient activity
 that has zero actionable fix. This is the single largest source of noise on a real cluster.
 
-## Status: Not Started
+## Status: Complete
 
 ## Deep-Dive Findings (2026-02-23)
 
@@ -57,8 +57,8 @@ that has zero actionable fix. This is the single largest source of noise on a re
 
 | Story | File | Status |
 |-------|------|--------|
-| Config — WATCH_NAMESPACES and EXCLUDE_NAMESPACES env vars | [STORY_01_config.md](STORY_01_config.md) | Not Started |
-| Reconciler — namespace filter gate in SourceProviderReconciler | [STORY_02_reconciler_filter.md](STORY_02_reconciler_filter.md) | Not Started |
+| Config — WATCH_NAMESPACES and EXCLUDE_NAMESPACES env vars | [STORY_01_config.md](STORY_01_config.md) | Complete |
+| Reconciler — namespace filter gate in SourceProviderReconciler | [STORY_02_reconciler_filter.md](STORY_02_reconciler_filter.md) | Complete |
 
 ## Implementation Order
 
@@ -68,11 +68,11 @@ STORY_01 (config) ──> STORY_02 (reconciler filter)
 
 ## Definition of Done
 
-- [ ] `config.Config` gains `WatchNamespaces []string` and `ExcludeNamespaces []string`
-- [ ] `config.FromEnv` parses both env vars (comma-separated); both default to nil
-- [ ] `SourceProviderReconciler.Reconcile` rejects findings outside `WatchNamespaces` (when non-empty)
-- [ ] `SourceProviderReconciler.Reconcile` rejects findings in `ExcludeNamespaces`
-- [ ] `NodeProvider` is explicitly exempt from namespace filtering (cluster-scoped, `finding.Namespace == ""`)
-- [ ] All unit and integration tests pass with `-race`
-- [ ] `WATCH_NAMESPACES` and `EXCLUDE_NAMESPACES` documented in `deploy/kustomize/deployment-watcher.yaml` as commented-out env vars
-- [ ] Worklog written
+- [x] `config.Config` gains `WatchNamespaces []string` and `ExcludeNamespaces []string`
+- [x] `config.FromEnv` parses both env vars (comma-separated); both default to nil
+- [x] `SourceProviderReconciler.Reconcile` rejects findings outside `WatchNamespaces` (when non-empty)
+- [x] `SourceProviderReconciler.Reconcile` rejects findings in `ExcludeNamespaces`
+- [x] `NodeProvider` is explicitly exempt from namespace filtering (cluster-scoped, `finding.Namespace == ""`)
+- [x] All unit and integration tests pass with `-race`
+- [x] `WATCH_NAMESPACES` and `EXCLUDE_NAMESPACES` documented in `charts/mendabot/templates/deployment-watcher.yaml` as commented-out env vars
+- [x] Worklog written

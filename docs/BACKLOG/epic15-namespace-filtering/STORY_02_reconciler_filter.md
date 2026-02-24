@@ -2,7 +2,7 @@
 
 **Epic:** [epic15-namespace-filtering](README.md)
 **Priority:** High
-**Status:** Not Started
+**Status:** Complete
 **Estimated Effort:** 1.5 hours
 
 ---
@@ -220,11 +220,11 @@ simulate a Node finding and confirm the filter block is skipped entirely.
 
 ## Definition of Done
 
-- [ ] Namespace filter block inserted in `Reconcile` at the correct location
-- [ ] `NodeProvider` (cluster-scoped, `finding.Namespace == ""`) is unconditionally exempt
-- [ ] `WatchNamespaces` checked before `ExcludeNamespaces`
-- [ ] Skipped findings logged at `Debug` level with nil-guard on `r.Log`
-- [ ] All nine table-driven tests pass with `-race`
-- [ ] Full test suite passes: `go test -timeout 120s -race ./...`
-- [ ] `go vet ./...` clean
-- [ ] `go build ./...` clean
+- [x] Namespace filter block inserted in `Reconcile` at the correct location
+- [x] `NodeProvider` (cluster-scoped, `finding.Namespace == ""`) is unconditionally exempt
+- [x] `WatchNamespaces` checked before `ExcludeNamespaces`
+- [x] Skipped findings logged at `Debug` level with nil-guard on `r.Log`
+- [x] All nine table-driven tests pass with `-race`
+- [x] Full test suite passes: `go test -timeout 120s -race ./...`
+- [x] `go vet ./...` clean
+- [x] `go build ./...` clean

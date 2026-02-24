@@ -469,15 +469,7 @@ List every file created or modified in this session.
 
 ### Worklog index
 
-`docs/WORKLOGS/README.md` must be kept up to date with a table of all entries:
-
-```markdown
-| # | Date | Description | Status |
-|---|------|-------------|--------|
-| 0001 | 2026-02-19 | Initial design and docs | Complete |
-```
-
-Update this table every time a new worklog is added.
+`docs/WORKLOGS/README.md` has no index — use `ls docs/WORKLOGS/` to find recent entries.
 
 ---
 
@@ -486,7 +478,7 @@ Update this table every time a new worklog is added.
 ### Before starting work
 
 1. Read `README-LLM.md` (this file)
-2. Read `docs/WORKLOGS/README.md` — scan the last 3–5 entries to understand current state
+2. Read `docs/WORKLOGS/` — scan the last 3–5 entries (`ls docs/WORKLOGS/ | tail -5`) to understand current state
 3. Read the latest worklog entry to find the documented next steps
 4. Read the relevant LLD for the component you are about to touch
 5. Check `docs/BACKLOG/` for the current story status
@@ -504,8 +496,7 @@ Update this table every time a new worklog is added.
 2. Verify tests pass
 3. Update backlog story status
 4. **Write a worklog entry** (see [Worklog Requirements](#worklog-requirements))
-5. Update `docs/WORKLOGS/README.md` index table
-6. Commit everything
+5. Commit everything
 
 ---
 
@@ -601,7 +592,6 @@ Follow this workflow for all epic/story implementation tasks:
 11. Final Validation
     └─> Run full repository test suite one final time
     └─> Confirm all backlog story checklists updated
-    └─> Confirm worklog index updated
 ```
 
 #### Orchestrator delegation guidelines
@@ -871,6 +861,7 @@ kubectl apply -k deploy/kustomize/
 | `main` | Stable code | Active | 2026-02-19 |
 | `feature/epic11-13-deferred` | Epic 11 (cascade prevention) + Epic 13 (multi-signal correlation) — deferred | Deferred | 2026-02-23 |
 | `feature/epic12-security-remediation` | Epic 12 security gap remediation (findings 001–013) | Active | 2026-02-23 |
+| `feature/epic15-namespace-filtering` | Epic 15 namespace filtering (WATCH_NAMESPACES, EXCLUDE_NAMESPACES) | Active | 2026-02-24 |
 | `feature/epic16-annotation-control` | Epic 16 per-resource annotation control (enabled, skip-until, priority) | Active | 2026-02-24 |
 
 **Merged branches:**

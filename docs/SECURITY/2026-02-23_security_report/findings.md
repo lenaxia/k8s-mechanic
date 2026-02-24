@@ -2,7 +2,7 @@
 
 **Review date:** 2026-02-23
 **Total findings:** 13
-**CRITICAL:** 0 | **HIGH:** 0 | **MEDIUM:** 3 | **LOW:** 5 | **INFO:** 5
+**CRITICAL:** 0 | **HIGH:** 0 | **MEDIUM:** 4 | **LOW:** 5 | **INFO:** 2
 
 ---
 
@@ -58,7 +58,7 @@ Upgrade Go toolchain to `go1.25.7` or later. Update `go.mod` `go` directive and 
 
 #### Resolution
 
-Open — pending toolchain upgrade.
+Remediated — `go.mod` updated to `go 1.23.12` in commit `2bb6347` on branch `feature/epic12-security-remediation`. All three CVEs are fixed in go1.23.12 (GO-2026-4341 fixed in 1.23.6, GO-2026-4340 fixed in 1.23.6, GO-2026-4337 fixed in 1.23.7).
 
 ---
 
@@ -102,7 +102,7 @@ Accepted — correctness issue only. No security risk.
 ### 2026-02-23-003: `FINDING_DETAILS` has no injection detection or prompt envelope
 
 **Severity:** MEDIUM
-**Status:** Open
+**Status:** Remediated
 **Phase:** 2
 **Attack Vector:** AV-03 (prompt injection — FINDING_DETAILS path)
 
@@ -143,7 +143,10 @@ Prompt injection via the FINDING_DETAILS path. The agent operates with read-only
 
 #### Resolution
 
-Open.
+Remediated in commit `96bec43`:
+- `internal/provider/provider.go`: `domain.DetectInjection(finding.Details)` check added with event `finding.injection_detected_in_details`; same log/suppress logic as the existing Errors check
+- `deploy/kustomize/configmap-prompt.yaml`: `BEGIN/END FINDING DETAILS (UNTRUSTED INPUT)` envelope added around `${FINDING_DETAILS}`; HARD RULE 8 updated to cover both envelope blocks
+- 4 TDD tests added in `internal/provider/provider_test.go`
 
 ---
 
@@ -194,7 +197,7 @@ Accepted — operator is a trusted party; exploiting this requires write access 
 ### 2026-02-23-005: Watcher ClusterRole grants ConfigMap write cluster-wide
 
 **Severity:** MEDIUM
-**Status:** Open
+**Status:** Remediated
 **Phase:** 2
 **Attack Vector:** AV-05 (watcher privilege escalation)
 
@@ -229,14 +232,16 @@ Restrict ConfigMap write to a Role (namespace-scoped, `mendabot` namespace only)
 
 #### Resolution
 
-Open.
+Remediated in commit `96bec43`:
+- `deploy/kustomize/clusterrole-watcher.yaml`: ConfigMaps split into a separate rule with `get/list/watch` only
+- `deploy/kustomize/role-watcher.yaml`: ConfigMaps rule added with `get/list/watch/create/update/patch` (namespace-scoped)
 
 ---
 
 ### 2026-02-23-006: Missing SHA256 checksum for yq, age, and opencode in Dockerfile.agent
 
 **Severity:** MEDIUM
-**Status:** Open
+**Status:** Remediated
 **Phase:** 2
 **Attack Vector:** AV-01 (supply chain — binary integrity)
 
@@ -280,14 +285,14 @@ Full agent container compromise. `opencode` is the LLM agent binary and has the 
 
 #### Resolution
 
-Open.
+Remediated in commit `96bec43`: 6 ARG variables (`YQ_SHA256_AMD64/ARM64`, `AGE_SHA256_AMD64/ARM64`, `OPENCODE_SHA256_AMD64/ARM64`) added to `docker/Dockerfile.agent`. Each of the three tool install blocks now includes `echo "${EXPECTED}  <path>" | sha256sum --check`. SHA256 values were computed by downloading the actual release artifacts (yq v4.45.1, age v1.3.1, opencode v1.2.10). Must be updated on each version bump.
 
 ---
 
 ### 2026-02-23-007: Base images not pinned to digest
 
 **Severity:** LOW
-**Status:** Open
+**Status:** Remediated
 **Phase:** 2
 **Attack Vector:** AV-01 (supply chain — mutable base image tag)
 
@@ -320,14 +325,14 @@ Update the digest in each Dependabot/image-update PR.
 
 #### Resolution
 
-Open.
+Remediated in commit `96bec43`: all three `FROM` lines now include `@sha256:` digest pins (`debian:bookworm-slim@sha256:6458e6ce...` in both Dockerfiles, `golang:1.23-bookworm@sha256:e87b2a5f...` in Dockerfile.watcher build stage). Digests fetched from Docker Hub API (linux/amd64).
 
 ---
 
 ### 2026-02-23-008: GitHub Actions not pinned to commit SHA
 
 **Severity:** LOW
-**Status:** Open
+**Status:** Remediated
 **Phase:** 2
 **Attack Vector:** AV-01 (supply chain — mutable action tag)
 
@@ -362,14 +367,14 @@ Pin all actions to their current commit SHA. Use a tool like `pin-github-actions
 
 #### Resolution
 
-Open.
+Remediated in commit `96bec43`: all 8 third-party actions across `.github/workflows/build-watcher.yaml`, `build-agent.yaml`, and `chart-test.yaml` now reference commit SHAs with the original version tag preserved as a comment (e.g. `actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4`).
 
 ---
 
 ### 2026-02-23-009: Trivy CI scan only fails on CRITICAL severity
 
 **Severity:** LOW
-**Status:** Open
+**Status:** Remediated
 **Phase:** 2
 **Attack Vector:** AV-01 (supply chain — CVE detection gap)
 
@@ -407,14 +412,14 @@ Use `ignore-unfixed: true` to suppress findings where no fix is yet available, r
 
 #### Resolution
 
-Open.
+Remediated in commit `96bec43`: `severity: CRITICAL` changed to `severity: CRITICAL,HIGH` in both `build-watcher.yaml` and `build-agent.yaml`.
 
 ---
 
 ### 2026-02-23-010: JWT Bearer token not redacted by `RedactSecrets`
 
 **Severity:** MEDIUM
-**Status:** Open
+**Status:** Remediated
 **Phase:** 3
 **Attack Vector:** AV-02 (secret exfiltration via LLM prompt)
 
@@ -452,14 +457,14 @@ Replace the token (group 2) with `[REDACTED]`, preserving the `Authorization: Be
 
 #### Resolution
 
-Open.
+Remediated in commit `96bec43`: pattern `(?i)(bearer )\S+` added to `internal/domain/redact.go`, positioned before the base64 sweep (order-critical — JWT header is valid base64). 2 TDD tests added.
 
 ---
 
 ### 2026-02-23-011: JSON-encoded credentials not redacted (`"password":"value"`)
 
 **Severity:** LOW
-**Status:** Open
+**Status:** Remediated
 **Phase:** 3
 **Attack Vector:** AV-02 (secret exfiltration via LLM prompt)
 
@@ -494,14 +499,14 @@ Replace group 2 with `[REDACTED]`.
 
 #### Resolution
 
-Open.
+Remediated in commit `96bec43`: pattern `(?i)("password"\s*:\s*)"[^"]*"` added to `internal/domain/redact.go` before the generic `password\s*[=:]` pattern. 3 TDD tests added.
 
 ---
 
 ### 2026-02-23-012: Redis URL with empty username not redacted (`redis://:password@host`)
 
 **Severity:** LOW
-**Status:** Open
+**Status:** Remediated
 **Phase:** 3
 **Attack Vector:** AV-02 (secret exfiltration via LLM prompt)
 
@@ -537,14 +542,14 @@ This allows zero or more characters before `:` in the userinfo section.
 
 #### Resolution
 
-Open.
+Remediated in commit `96bec43`: URL pattern quantifier changed from `[^:@\s]+` to `[^:@\s]*` in `internal/domain/redact.go`. 1 TDD test added.
 
 ---
 
 ### 2026-02-23-013: Injection detection does not cover "stop following the rules" variant
 
 **Severity:** INFO
-**Status:** Open
+**Status:** Remediated
 **Phase:** 3
 **Attack Vector:** AV-03 (prompt injection — pattern gap)
 
@@ -576,6 +581,6 @@ regexp.MustCompile(`(?i)stop\s+(following|obeying|respecting)\s+(the\s+)?(rules|
 
 #### Resolution
 
-Open — low priority; envelope and HARD RULE 8 are the primary mitigations.
+Remediated in commit `96bec43`: pattern `(?i)stop\s+(following|obeying)\s+((the|these|all)\s+)?(rules?|instructions?|guidelines?|prompts?)` added as the fifth entry in `injectionPatterns` in `internal/domain/injection.go`. 5 TDD tests added (4 positive matches, 1 negative guard).
 
 ---

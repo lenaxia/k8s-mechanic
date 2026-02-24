@@ -7,9 +7,12 @@ import (
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
@@ -24,6 +27,9 @@ import (
 	"github.com/lenaxia/k8s-mendabot/internal/logging"
 	"github.com/lenaxia/k8s-mendabot/internal/provider"
 	"github.com/lenaxia/k8s-mendabot/internal/provider/native"
+	"github.com/lenaxia/k8s-mendabot/internal/readiness"
+	"github.com/lenaxia/k8s-mendabot/internal/readiness/llm"
+	"github.com/lenaxia/k8s-mendabot/internal/readiness/sink"
 )
 
 // Version is embedded at build time via ldflags:
@@ -65,13 +71,30 @@ func main() {
 		logger.Fatal("failed to add v1alpha1 remediation scheme", zap.Error(err))
 	}
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+	opts := ctrl.Options{
 		Scheme:                  scheme,
 		LeaderElection:          false,
 		Metrics:                 metricsserver.Options{BindAddress: ":8080"},
 		HealthProbeBindAddress:  ":8081",
 		GracefulShutdownTimeout: func() *time.Duration { d := 30 * time.Second; return &d }(),
-	})
+		Cache: cache.Options{
+			ByObject: map[client.Object]cache.ByObject{
+				&corev1.Secret{}: {
+					Namespaces: map[string]cache.Config{
+						cfg.AgentNamespace: {},
+					},
+				},
+			},
+		},
+	}
+	if len(cfg.AgentWatchNamespaces) > 0 {
+		defaultNS := make(map[string]cache.Config)
+		for _, ns := range cfg.AgentWatchNamespaces {
+			defaultNS[ns] = cache.Config{}
+		}
+		opts.Cache.DefaultNamespaces = defaultNS
+	}
+	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), opts)
 	if err != nil {
 		log.Fatalf("unable to start manager: %v", err)
 	}
@@ -82,6 +105,39 @@ func main() {
 	if err != nil {
 		logger.Fatal("jobbuilder init failed", zap.Error(err))
 	}
+
+	// Build the readiness checker that gates RemediationJob creation.
+	// The sink checker is selected by SINK_TYPE; unset/unknown = NopChecker.
+	// The LLM checker is selected by LLM_PROVIDER; unset = NopChecker (disabled).
+	// provider.ReadinessCacheTTL is used for both the cache TTL and the requeue
+	// interval on failure, ensuring the cache is always expired before retry.
+
+	var sinkChecker readiness.Checker
+	switch cfg.SinkType {
+	case "github":
+		sinkChecker = readiness.NewCachedChecker(
+			sink.NewGitHubAppChecker(mgr.GetClient(), cfg.AgentNamespace),
+			provider.ReadinessCacheTTL,
+		)
+	default:
+		sinkChecker = readiness.NewNopChecker("sink")
+		logger.Info("no readiness checker for sink type; sink check disabled",
+			zap.String("sinkType", cfg.SinkType))
+	}
+
+	var llmChecker readiness.Checker
+	switch cfg.LLMProvider {
+	case "openai":
+		llmChecker = readiness.NewCachedChecker(
+			llm.NewOpenAIChecker(mgr.GetClient(), cfg.AgentNamespace),
+			provider.ReadinessCacheTTL,
+		)
+	default:
+		llmChecker = readiness.NewNopChecker("llm")
+		logger.Info("LLM_PROVIDER not set; LLM readiness check disabled")
+	}
+
+	combinedChecker := readiness.All(sinkChecker, llmChecker)
 
 	if err := (&controller.RemediationJobReconciler{
 		Client:     mgr.GetClient(),
@@ -100,16 +156,17 @@ func main() {
 		native.NewPVCProvider(nativeClient),
 		native.NewNodeProvider(nativeClient),
 		native.NewStatefulSetProvider(nativeClient),
-		native.NewJobProvider(nativeClient, cfg),
+		native.NewJobProvider(nativeClient),
 	}
 	for _, p := range enabledProviders {
 		if err := (&provider.SourceProviderReconciler{
-			Client:        mgr.GetClient(),
-			Scheme:        mgr.GetScheme(),
-			Log:           logger,
-			Cfg:           cfg,
-			Provider:      p,
-			EventRecorder: mgr.GetEventRecorderFor("mendabot-watcher"),
+			Client:           mgr.GetClient(),
+			Scheme:           mgr.GetScheme(),
+			Log:              logger,
+			Cfg:              cfg,
+			Provider:         p,
+			EventRecorder:    mgr.GetEventRecorderFor("mendabot-watcher"),
+			ReadinessChecker: combinedChecker,
 		}).SetupWithManager(mgr); err != nil {
 			logger.Fatal("provider setup failed", zap.Error(err))
 		}

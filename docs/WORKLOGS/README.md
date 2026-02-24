@@ -61,11 +61,32 @@ else.
 | [0039](0039_2026-02-23_epic11-bug-fixes.md) | 2026-02-23 | Epic 11 bug fixes: 7 bugs fixed, 3 tests added, race detector clean, story DoD updated | Complete |
 | [0040](0040_2026-02-23_epic11-story06-complete.md) | 2026-02-23 | Epic 11 STORY_06: EventRecorder (3 events, 4 tests), 10-gap review cycle, Grafana dashboard, alert rules | Complete |
 | [0041](0041_2026-02-23_helm-crd-upgrader-image-fix.md) | 2026-02-23 | Helm CRD upgrader image fix: nonexistent tag v1.28.16 corrected to v1.28.15, image made configurable | Complete |
-| [0042](0042_2026-02-23_remove-crd-hook-job.md) | 2026-02-23 | Helm: remove CRD hook job in favour of native crds/ directory | Complete |
-| [0043](0043_2026-02-23_epic12-story00-security-infra.md) | 2026-02-23 | Epic 12 STORY_00: Makefile, kind-config, Trivy CI steps, gosec baseline placeholder | Complete |
-| [0044](0044_2026-02-23_story01-secret-redaction.md) | 2026-02-23 | STORY_01: RedactSecrets applied at all 6 native provider error text sites, 8 new tests | Complete |
-| [0045](0045_2026-02-23_story05-prompt-injection-defence.md) | 2026-02-23 | STORY_05: injection detection, truncate helper, config field, prompt envelope, HARD RULE 8 | Complete |
-| [0046](0046_2026-02-23_story03-audit-log.md) | 2026-02-23 | STORY_03: structured audit log lines at all 10 decision points in both reconcilers | Complete |
-| [0047](0047_2026-02-23_story02-network-policy.md) | 2026-02-23 | STORY_02: NetworkPolicy egress restriction for agent Jobs, security overlay | Complete |
-| [0048](0048_2026-02-23_story04-agent-rbac-scoping.md) | 2026-02-23 | STORY_04: AgentRBACScope config, NS SA selection, 4 RBAC manifests, 5 TDD tests | Complete |
-| [0049](0049_2026-02-23_epic12-story06-pentest-complete.md) | 2026-02-23 | STORY_06: penetration test plan executed; 5 PASS, 1 SKIP; no HIGH/CRITICAL findings | Complete |
+| [0042](0042_2026-02-23_epic13-story03-jobbuilder-multi-finding.md) | 2026-02-23 | Epic 13 STORY_03: Build() two-arg signature, correlated findings env var injection, all call sites fixed | Complete |
+| [0043](0043_2026-02-24_epic13-story02-correlation-window.md) | 2026-02-24 | Epic 13 STORY_02: Correlator struct, correlation window hold, config fields, controller wiring | Complete |
+| [0044](0044_2026-02-23_epic13-story05-integration-tests.md) | 2026-02-23 | Epic 13 STORY_05: 6 envtest integration tests for correlation rules and escape hatch | Complete |
+| [0045](0045_2026-02-23_epic13-complete.md) | 2026-02-23 | Epic 13 complete: all 6 stories committed, story/epic status markers updated | Complete |
+| [0046](0046_2026-02-23_epic13-test-fix.md) | 2026-02-23 | Epic 13 test fix: 7 failing controller tests fixed via deep code review | Complete |
+| [0047](0047_2026-02-23_epic14-story01-test-isolation.md) | 2026-02-23 | Epic 14 S01: test isolation — newIntegrationJob namespace fix, pre-test stale guards, cleanupJobsInNS | Complete |
+| [0048](0048_2026-02-23_epic14-count3-finalizer-fix.md) | 2026-02-23 | Epic 14 -count=3: deleteJob helper strips finalizers, corrNS unique namespace counters | Complete |
+| [0049](0049_2026-02-23_epic13-14-review-gaps.md) | 2026-02-23 | Epic 13+14 skeptical review: 9 gaps found and fixed (DC-5, XC-2 major; 7 minor) | Complete |
+| [0050](0050_2026-02-23_epic13-design-review-fixes.md) | 2026-02-23 | Epic 13 design review: off-by-one bug, nondeterminism, prefix over-match, scope docs | Complete |
+| [0051](0051_2026-02-23_epic11-13-branch-extraction-test-fixes.md) | 2026-02-23 | Epic 11+13 branch extraction: test isolation fixes, readiness gate, epic14 test infra | Complete |
+| [0052](0052_2026-02-23_remove-crd-hook-job.md) | 2026-02-23 | Helm: remove CRD hook job in favour of native crds/ directory | Complete |
+| [0053](0053_2026-02-23_epic12-story00-security-infra.md) | 2026-02-23 | Epic 12 STORY_00: Makefile, kind-config, Trivy CI steps, gosec baseline placeholder | Complete |
+| [0054](0054_2026-02-23_story01-secret-redaction.md) | 2026-02-23 | STORY_01: RedactSecrets applied at all 6 native provider error text sites, 8 new tests | Complete |
+| [0055](0055_2026-02-23_story05-prompt-injection-defence.md) | 2026-02-23 | STORY_05: injection detection, truncate helper, config field, prompt envelope, HARD RULE 8 | Complete |
+| [0056](0056_2026-02-23_story03-audit-log.md) | 2026-02-23 | STORY_03: structured audit log lines at all 10 decision points in both reconcilers | Complete |
+| [0057](0057_2026-02-23_story02-network-policy.md) | 2026-02-23 | STORY_02: NetworkPolicy egress restriction for agent Jobs, security overlay | Complete |
+| [0058](0058_2026-02-23_story04-agent-rbac-scoping.md) | 2026-02-23 | STORY_04: AgentRBACScope config, NS SA selection, 4 RBAC manifests, 5 TDD tests | Complete |
+| [0059](0059_2026-02-23_epic12-story06-pentest-complete.md) | 2026-02-23 | STORY_06: penetration test plan executed; 5 PASS, 1 SKIP; no HIGH/CRITICAL findings | Complete |
+| [0060](0060_2026-02-23_go-toolchain-cve-remediation.md) | 2026-02-23 | Finding 2026-02-23-001: upgrade go 1.23.0 → 1.23.12 to fix GO-2026-4341/4340/4337 | Complete |
+| [0061](0061_2026-02-23_epic12-security-remediation-complete.md) | 2026-02-23 | Epic 12 orchestrator: all 11 open security findings remediated, report updated | Complete |
+| [0062](0062_2026-02-23_epic17-story01-crd-types.md) | 2026-02-23 | Epic 17 STORY_01: PhasePermanentlyFailed, ConditionPermanentlyFailed, MaxRetries, RetryCount | Complete |
+| [0063](0063_2026-02-23_epic17-story02-config-retries.md) | 2026-02-23 | Epic 17 STORY_02: MaxInvestigationRetries int32 field + MAX_INVESTIGATION_RETRIES env var parsing | Complete |
+| [0064](0064_2026-02-23_epic17-story03-retry-count.md) | 2026-02-23 | Epic 17 STORY_03: RetryCount increment, PermanentlyFailed cap, terminal switch, audit log | Complete |
+| [0065](0065_2026-02-23_epic17-story05-crd-schema-updates.md) | 2026-02-23 | Epic 17 STORY_05: CRD YAML schema updates — maxRetries, retryCount, PermanentlyFailed | Complete |
+| [0066](0066_2026-02-24_epic17-story04-provider-gate.md) | 2026-02-24 | Epic 17 STORY_04: switch-based dedup loop, PermanentlyFailed tombstone gate, MaxRetries population | Complete |
+| [0067](0067_2026-02-23_epic17-dead-letter-queue-complete.md) | 2026-02-23 | Epic 17 complete: all 5 stories, 12 packages green, dead-letter queue fully implemented | Complete |
+| [0068](0068_2026-02-23_cross-epic-validation-gap-fixes.md) | 2026-02-23 | Cross-epic skeptical validation: 11 gaps found and fixed (4 Major, 7 Minor) | Complete |
+| [0069](0069_2026-02-23_second-pass-validation-gap-fixes.md) | 2026-02-23 | Second-pass validation: 4 gaps found and fixed (1 Critical, 1 Major, 2 Minor) | Complete |
+| [0070](0070_2026-02-24_third-pass-validation-gap-fixes.md) | 2026-02-24 | Third-pass validation: 5 gaps found and fixed (2 Major, 3 Minor) | Complete |

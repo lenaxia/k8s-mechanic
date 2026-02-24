@@ -105,6 +105,7 @@ func (r *SourceProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 					r.Log.Info("RemediationJob cancelled",
 						zap.Bool("audit", true),
 						zap.String("event", "remediationjob.cancelled"),
+						zap.String("provider", r.Provider.ProviderName()),
 						zap.String("remediationJob", rjob.Name),
 						zap.String("reason", "source_deleted"),
 						zap.String("sourceRef", req.Name),
@@ -234,6 +235,7 @@ func (r *SourceProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 				r.Log.Info("RemediationJob permanently failed; suppressing re-dispatch",
 					zap.Bool("audit", true),
 					zap.String("event", "remediationjob.permanently_failed_suppressed"),
+					zap.String("provider", r.Provider.ProviderName()),
 					zap.String("remediationJob", rjob.Name),
 					zap.String("fingerprint", fp[:12]),
 				)
@@ -270,6 +272,7 @@ func (r *SourceProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 				r.Log.Error("readiness check failed, suppressing RemediationJob creation",
 					zap.Bool("audit", true),
 					zap.String("event", "readiness.check_failed"),
+					zap.String("provider", r.Provider.ProviderName()),
 					zap.Error(err),
 					zap.String("checker", r.ReadinessChecker.Name()),
 					zap.String("fingerprint", fp[:12]),
@@ -325,6 +328,15 @@ func (r *SourceProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	if err := r.Create(ctx, rjob); err != nil {
 		if apierrors.IsAlreadyExists(err) {
+			if r.Log != nil {
+				r.Log.Info("finding suppressed",
+					zap.Bool("audit", true),
+					zap.String("event", "finding.suppressed.duplicate"),
+					zap.String("provider", r.Provider.ProviderName()),
+					zap.String("fingerprint", fp[:12]),
+					zap.String("reason", "create_race"),
+				)
+			}
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, fmt.Errorf("creating RemediationJob: %w", err)

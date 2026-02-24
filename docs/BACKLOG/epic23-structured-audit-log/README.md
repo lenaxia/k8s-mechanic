@@ -2,7 +2,7 @@
 
 **Feature:** FT-S3 — Structured audit log for all remediation decisions
 **Branch:** `feature/epic23-structured-audit-log`
-**Status:** In Progress
+**Status:** Complete
 
 ---
 
@@ -64,6 +64,7 @@ deferred gaps no longer apply.
 | `finding.suppressed.stabilisation_window` (first_seen) | provider.go ~177 | no `audit=true` |
 | `finding.suppressed.stabilisation_window` (window_open) | provider.go ~188 | no `audit=true` |
 | `finding.suppressed.duplicate` | provider.go ~233 | `Debug` level, no `audit=true` |
+| `readiness.check_failed` | provider.go ~250 | missing `event` field string |
 
 ---
 
@@ -71,13 +72,13 @@ deferred gaps no longer apply.
 
 | Story | Description | Status |
 |-------|-------------|--------|
-| [STORY_01](STORY_01_provider_audit_gaps.md) | Fix 4 gaps in provider.go | Pending |
+| [STORY_01](STORY_01_provider_audit_gaps.md) | Fix 4 gaps in provider.go | Complete |
 
 ---
 
 ## Definition of Done
 
-- [ ] All 4 gaps fixed in `internal/provider/provider.go`
-- [ ] `go test -timeout 30s -race ./...` passes
-- [ ] Code reviewed with zero gaps
-- [ ] Worklog written and index updated
+- [x] All 4 gaps fixed in `internal/provider/provider.go`
+- [x] `go test -timeout 30s -race ./...` passes
+- [x] Code reviewed with zero gaps
+- [x] Worklog written and index updated

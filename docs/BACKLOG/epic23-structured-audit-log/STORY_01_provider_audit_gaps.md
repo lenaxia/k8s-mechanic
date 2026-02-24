@@ -2,7 +2,7 @@
 
 **Epic:** [epic23-structured-audit-log](README.md)
 **Priority:** High
-**Status:** Pending
+**Status:** Complete
 
 ---
 
@@ -32,16 +32,17 @@ No logic changes are required — these are log-only additions.
 
 ## Acceptance Criteria
 
-- [ ] After `ExtractFinding` returns non-nil and the fingerprint is computed, emit:
+- [x] After `ExtractFinding` returns non-nil and the fingerprint is computed, emit:
       `event=finding.detected` at `Info` level with `audit=true`
-- [ ] Stabilisation window first-seen path emits `audit=true` with
+- [x] Stabilisation window first-seen path emits `audit=true` with
       `event=finding.suppressed.stabilisation_window` and `reason=first_seen`
-- [ ] Stabilisation window still-within-window path emits `audit=true` with
+- [x] Stabilisation window still-within-window path emits `audit=true` with
       `event=finding.suppressed.stabilisation_window` and `reason=window_open`
-- [ ] Dedup default case (existing non-Failed RemediationJob) emits `Info` level with
+- [x] Dedup default case (existing non-Failed RemediationJob) emits `Info` level with
       `audit=true` and `event=finding.suppressed.duplicate`
-- [ ] All existing tests continue to pass (`go test -timeout 30s -race ./...`)
-- [ ] No logic changes — log additions only
+- [x] All existing tests continue to pass (`go test -timeout 30s -race ./...`)
+- [x] No logic changes — log additions only
+- [x] Existing `readiness.check_failed` log call includes `zap.String("event", "readiness.check_failed")`
 
 ---
 
@@ -150,7 +151,7 @@ None. All required infrastructure is already in place.
 
 ## Definition of Done
 
-- [ ] `go test -timeout 30s -race ./...` passes
-- [ ] All 4 gaps fixed in `internal/provider/provider.go`
-- [ ] No logic changes — log additions and updates only
-- [ ] Code reviewed with zero gaps
+- [x] `go test -timeout 30s -race ./...` passes
+- [x] All 4 gaps fixed in `internal/provider/provider.go`
+- [x] No logic changes — log additions and updates only
+- [x] Code reviewed with zero gaps

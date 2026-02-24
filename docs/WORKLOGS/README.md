@@ -70,3 +70,14 @@ else.
 | [0048](0048_2026-02-23_epic14-count3-finalizer-fix.md) | 2026-02-23 | Epic 14 -count=3: deleteJob helper strips finalizers, corrNS unique namespace counters | Complete |
 | [0049](0049_2026-02-23_epic13-14-review-gaps.md) | 2026-02-23 | Epic 13+14 skeptical review: 9 gaps found and fixed (DC-5, XC-2 major; 7 minor) | Complete |
 | [0050](0050_2026-02-23_epic13-design-review-fixes.md) | 2026-02-23 | Epic 13 design review: off-by-one bug, nondeterminism, prefix over-match, scope docs | Complete |
+| [0051](0051_2026-02-23_epic11-13-branch-extraction-test-fixes.md) | 2026-02-23 | Epic 11+13 branch extraction: test isolation fixes, readiness gate, epic14 test infra | Complete |
+| [0052](0052_2026-02-23_remove-crd-hook-job.md) | 2026-02-23 | Helm: remove CRD hook job in favour of native crds/ directory | Complete |
+| [0053](0053_2026-02-23_epic12-story00-security-infra.md) | 2026-02-23 | Epic 12 STORY_00: Makefile, kind-config, Trivy CI steps, gosec baseline placeholder | Complete |
+| [0054](0054_2026-02-23_story01-secret-redaction.md) | 2026-02-23 | STORY_01: RedactSecrets applied at all 6 native provider error text sites, 8 new tests | Complete |
+| [0055](0055_2026-02-23_story05-prompt-injection-defence.md) | 2026-02-23 | STORY_05: injection detection, truncate helper, config field, prompt envelope, HARD RULE 8 | Complete |
+| [0056](0056_2026-02-23_story03-audit-log.md) | 2026-02-23 | STORY_03: structured audit log lines at all 10 decision points in both reconcilers | Complete |
+| [0057](0057_2026-02-23_story02-network-policy.md) | 2026-02-23 | STORY_02: NetworkPolicy egress restriction for agent Jobs, security overlay | Complete |
+| [0058](0058_2026-02-23_story04-agent-rbac-scoping.md) | 2026-02-23 | STORY_04: AgentRBACScope config, NS SA selection, 4 RBAC manifests, 5 TDD tests | Complete |
+| [0059](0059_2026-02-23_epic12-story06-pentest-complete.md) | 2026-02-23 | STORY_06: penetration test plan executed; 5 PASS, 1 SKIP; no HIGH/CRITICAL findings | Complete |
+| [0060](0060_2026-02-23_go-toolchain-cve-remediation.md) | 2026-02-23 | Finding 2026-02-23-001: upgrade go 1.23.0 → 1.23.12 to fix GO-2026-4341/4340/4337 | Complete |
+| [0061](0061_2026-02-23_epic12-security-remediation-complete.md) | 2026-02-23 | Epic 12 orchestrator: all 11 open security findings remediated, report updated | Complete |

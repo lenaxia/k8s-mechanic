@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -22,7 +23,10 @@ type Config struct {
 	StabilisationWindow      time.Duration // STABILISATION_WINDOW_SECONDS — default 120s; 0 disables
 	// LLMProvider selects the LLM readiness checker used to gate RemediationJob
 	// creation. Accepted values: "openai". Empty (default) disables the check.
-	LLMProvider string // LLM_PROVIDER — default "" (disabled)
+	LLMProvider              string   // LLM_PROVIDER — default "" (disabled)
+	InjectionDetectionAction string   // INJECTION_DETECTION_ACTION — "log" (default) or "suppress"
+	AgentRBACScope           string   // AGENT_RBAC_SCOPE — "cluster" (default) or "namespace"
+	AgentWatchNamespaces     []string // AGENT_WATCH_NAMESPACES — required when scope is "namespace"
 }
 
 // FromEnv reads configuration from environment variables and returns a Config.
@@ -118,6 +122,40 @@ func FromEnv() (Config, error) {
 			"LLM_PROVIDER %q is not supported; accepted values: openai (or unset to disable)",
 			cfg.LLMProvider,
 		)
+	}
+
+	action := os.Getenv("INJECTION_DETECTION_ACTION")
+	if action == "" {
+		action = "log"
+	}
+	if action != "log" && action != "suppress" {
+		return Config{}, fmt.Errorf("INJECTION_DETECTION_ACTION must be 'log' or 'suppress', got %q", action)
+	}
+	cfg.InjectionDetectionAction = action
+
+	scope := os.Getenv("AGENT_RBAC_SCOPE")
+	if scope == "" {
+		scope = "cluster"
+	}
+	if scope != "cluster" && scope != "namespace" {
+		return Config{}, fmt.Errorf("AGENT_RBAC_SCOPE must be 'cluster' or 'namespace', got %q", scope)
+	}
+	cfg.AgentRBACScope = scope
+
+	if scope == "namespace" {
+		nsStr := os.Getenv("AGENT_WATCH_NAMESPACES")
+		if nsStr == "" {
+			return Config{}, fmt.Errorf("AGENT_WATCH_NAMESPACES is required when AGENT_RBAC_SCOPE=namespace")
+		}
+		for _, ns := range strings.Split(nsStr, ",") {
+			ns = strings.TrimSpace(ns)
+			if ns != "" {
+				cfg.AgentWatchNamespaces = append(cfg.AgentWatchNamespaces, ns)
+			}
+		}
+		if len(cfg.AgentWatchNamespaces) == 0 {
+			return Config{}, fmt.Errorf("AGENT_WATCH_NAMESPACES is empty after parsing")
+		}
 	}
 
 	return cfg, nil

@@ -99,6 +99,14 @@ func (r *SourceProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			}
 			if delErr := r.Delete(ctx, rjob); delErr != nil && !apierrors.IsNotFound(delErr) {
 				cancelErrs = append(cancelErrs, delErr)
+			} else if r.Log != nil {
+				r.Log.Info("RemediationJob cancelled",
+					zap.Bool("audit", true),
+					zap.String("event", "remediationjob.cancelled"),
+					zap.String("remediationJob", rjob.Name),
+					zap.String("reason", "source_deleted"),
+					zap.String("sourceRef", req.Name),
+				)
 			}
 		}
 		if len(cancelErrs) > 0 {
@@ -114,6 +122,38 @@ func (r *SourceProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if finding == nil {
 		r.firstSeen.Clear()
 		return ctrl.Result{}, nil
+	}
+
+	if domain.DetectInjection(finding.Errors) {
+		if r.Log != nil {
+			r.Log.Warn("potential prompt injection detected in finding errors",
+				zap.Bool("audit", true),
+				zap.String("event", "finding.injection_detected"),
+				zap.String("provider", r.Provider.ProviderName()),
+				zap.String("kind", finding.Kind),
+				zap.String("namespace", finding.Namespace),
+				zap.String("name", finding.Name),
+			)
+		}
+		if r.Cfg.InjectionDetectionAction == "suppress" {
+			return ctrl.Result{}, nil
+		}
+	}
+
+	if domain.DetectInjection(finding.Details) {
+		if r.Log != nil {
+			r.Log.Warn("potential prompt injection detected in finding details",
+				zap.Bool("audit", true),
+				zap.String("event", "finding.injection_detected_in_details"),
+				zap.String("provider", r.Provider.ProviderName()),
+				zap.String("kind", finding.Kind),
+				zap.String("namespace", finding.Namespace),
+				zap.String("name", finding.Name),
+			)
+		}
+		if r.Cfg.InjectionDetectionAction == "suppress" {
+			return ctrl.Result{}, nil
+		}
 	}
 
 	fp, err := domain.FindingFingerprint(finding)
@@ -181,6 +221,11 @@ func (r *SourceProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 	}
 
+	agentSA := r.Cfg.AgentSA
+	if r.Cfg.AgentRBACScope == "namespace" {
+		agentSA = "mendabot-agent-ns"
+	}
+
 	rjob := &v1alpha1.RemediationJob{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "mendabot-" + fp[:12],
@@ -212,7 +257,7 @@ func (r *SourceProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			GitOpsRepo:         r.Cfg.GitOpsRepo,
 			GitOpsManifestRoot: r.Cfg.GitOpsManifestRoot,
 			AgentImage:         r.Cfg.AgentImage,
-			AgentSA:            r.Cfg.AgentSA,
+			AgentSA:            agentSA,
 		},
 	}
 
@@ -224,9 +269,13 @@ func (r *SourceProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	if r.Log != nil {
-		r.Log.Info("created RemediationJob",
+		r.Log.Info("RemediationJob created",
+			zap.Bool("audit", true),
+			zap.String("event", "remediationjob.created"),
+			zap.String("provider", r.Provider.ProviderName()),
 			zap.String("fingerprint", fp[:12]),
 			zap.String("kind", finding.Kind),
+			zap.String("namespace", finding.Namespace),
 			zap.String("parentObject", finding.ParentObject),
 			zap.String("remediationJob", rjob.Name),
 		)

@@ -200,6 +200,22 @@ func (r *SourceProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 				return ctrl.Result{}, nil
 			}
 		}
+		var ns corev1.Namespace
+		if err := r.Get(ctx, client.ObjectKey{Name: finding.Namespace}, &ns); err != nil {
+			if !apierrors.IsNotFound(err) {
+				return ctrl.Result{}, fmt.Errorf("fetching namespace %s: %w", finding.Namespace, err)
+			}
+		} else if domain.ShouldSkip(ns.GetAnnotations(), time.Now()) {
+			if r.Log != nil {
+				r.Log.Debug("namespace annotation gate: skipping finding",
+					zap.String("provider", r.Provider.ProviderName()),
+					zap.String("namespace", finding.Namespace),
+					zap.String("kind", finding.Kind),
+					zap.String("name", finding.Name),
+				)
+			}
+			return ctrl.Result{}, nil
+		}
 	}
 
 	fp, err := domain.FindingFingerprint(finding)

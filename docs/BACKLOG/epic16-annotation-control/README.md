@@ -68,23 +68,27 @@ continuously trigger new `RemediationJob` objects that have to be manually delet
 | Domain — annotation constants and skip logic | [STORY_01_annotation_constants.md](STORY_01_annotation_constants.md) | Complete |
 | Providers — ExtractFinding annotation gate | [STORY_02_provider_gate.md](STORY_02_provider_gate.md) | Complete |
 | Reconciler — priority annotation bypasses stabilisation window | [STORY_03_priority_bypass.md](STORY_03_priority_bypass.md) | Complete |
+| Reconciler — namespace-level annotation gate | [STORY_04_namespace_annotation_gate.md](STORY_04_namespace_annotation_gate.md) | Complete |
 
 ## Implementation Order
 
 ```
 STORY_01 (domain constants) ──> STORY_02 (providers)
                             ──> STORY_03 (reconciler)
+                            ──> STORY_04 (namespace gate)
 ```
 
-STORY_02 and STORY_03 are independent once STORY_01 is complete.
+STORY_02, STORY_03, and STORY_04 are independent once STORY_01 is complete.
 
 ## Definition of Done
 
-- [ ] Annotation keys defined as typed constants in `internal/domain/annotations.go`
-- [ ] `ShouldSkip` helper implemented with correct `skip-until` boundary semantics (inclusive, midnight UTC)
-- [ ] `ExtractFinding` in each provider returns `(nil, nil)` when `mendabot.io/enabled: "false"` is set
-- [ ] `ExtractFinding` in each provider returns `(nil, nil)` when `mendabot.io/skip-until` is set to a future date
-- [ ] `SourceProviderReconciler` bypasses stabilisation window when `mendabot.io/priority: "critical"` is set
-- [ ] `firstSeen` map is never consulted for priority-critical resources
-- [ ] All unit tests pass with `-race`
-- [ ] Worklog written
+- [x] Annotation keys defined as typed constants in `internal/domain/annotations.go`
+- [x] `ShouldSkip` helper implemented with correct `skip-until` boundary semantics (inclusive, midnight UTC)
+- [x] `ExtractFinding` in each provider returns `(nil, nil)` when `mendabot.io/enabled: "false"` is set
+- [x] `ExtractFinding` in each provider returns `(nil, nil)` when `mendabot.io/skip-until` is set to a future date
+- [x] `SourceProviderReconciler` bypasses stabilisation window when `mendabot.io/priority: "critical"` is set
+- [x] `firstSeen` map is never consulted for priority-critical resources
+- [x] `SourceProviderReconciler` skips findings when the `Namespace` object is annotated `mendabot.io/enabled: "false"` or `mendabot.io/skip-until` (future date)
+- [x] Cluster-scoped resources (Nodes, `finding.Namespace == ""`) are unconditionally exempt from namespace gate
+- [x] All unit tests pass with `-race`
+- [x] Worklog written

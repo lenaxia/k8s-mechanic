@@ -3,6 +3,7 @@ package provider_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +21,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	v1alpha1 "github.com/lenaxia/k8s-mendabot/api/v1alpha1"
 	"github.com/lenaxia/k8s-mendabot/internal/config"
@@ -1847,13 +1849,6 @@ func makePodFinding(namespace string) *domain.Finding {
 	}
 }
 
-// newObserverDebugLogger returns a *zap.Logger backed by a zaptest/observer core at Debug
-// level so that tests can assert on Debug-level log entries.
-func newObserverDebugLogger() (*zap.Logger, *observer.ObservedLogs) {
-	core, logs := observer.New(zapcore.DebugLevel)
-	return zap.New(core), logs
-}
-
 // TestNSFilter covers all nine namespace-filter cases in a single table-driven test.
 // Each sub-test uses an independent client/reconciler to avoid shared state.
 func TestNSFilter(t *testing.T) {
@@ -2091,6 +2086,363 @@ func TestNSFilter_WatchNoMatch_NilLog_NoPanic(t *testing.T) {
 	}
 	if len(list.Items) != 0 {
 		t.Errorf("expected 0 RemediationJobs when namespace not in WatchNamespaces and Log=nil, got %d", len(list.Items))
+	}
+}
+
+// --- Namespace annotation gate tests (STORY_04) ---
+
+// newObserverDebugLogger returns a *zap.Logger backed by a zaptest/observer core at Debug
+// level so that tests can assert on Debug-level log entries.
+func newObserverDebugLogger() (*zap.Logger, *observer.ObservedLogs) {
+	core, logs := observer.New(zapcore.DebugLevel)
+	return zap.New(core), logs
+}
+
+// crashLoopFinding returns a Finding for a CrashLoopBackOff pod in the given namespace.
+// This ensures the finding would naturally proceed to RemediationJob creation without
+// any gate suppressing it (other than the namespace gate under test).
+func crashLoopFinding(namespace string) *domain.Finding {
+	return &domain.Finding{
+		Kind:         "Pod",
+		Name:         "crash-pod",
+		Namespace:    namespace,
+		ParentObject: "crash-deploy",
+		Errors:       `[{"text":"CrashLoopBackOff"}]`,
+		Details:      "Container is crash looping",
+	}
+}
+
+func TestNSAnnotation_NoAnnotation_Proceeds(t *testing.T) {
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "production",
+		},
+	}
+	watched := makeWatchedObject("r1", "production")
+	c := newTestClient(ns, watched)
+
+	p := &fakeSourceProvider{
+		name:       "native",
+		objectType: &corev1.ConfigMap{},
+		finding:    crashLoopFinding("production"),
+	}
+	r := newTestReconciler(p, c)
+
+	_, err := r.Reconcile(context.Background(), reqFor("r1", "production"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var list v1alpha1.RemediationJobList
+	if err := c.List(context.Background(), &list, client.InNamespace(agentNamespace)); err != nil {
+		t.Fatalf("list error: %v", err)
+	}
+	if len(list.Items) != 1 {
+		t.Errorf("NSAnnotation_NoAnnotation_Proceeds: expected 1 RemediationJob, got %d", len(list.Items))
+	}
+}
+
+func TestNSAnnotation_EnabledFalse_Suppressed(t *testing.T) {
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "production",
+			Annotations: map[string]string{
+				domain.AnnotationEnabled: "false",
+			},
+		},
+	}
+	watched := makeWatchedObject("r1", "production")
+	c := newTestClient(ns, watched)
+
+	p := &fakeSourceProvider{
+		name:       "native",
+		objectType: &corev1.ConfigMap{},
+		finding:    crashLoopFinding("production"),
+	}
+	r := newTestReconciler(p, c)
+
+	result, err := r.Reconcile(context.Background(), reqFor("r1", "production"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != (ctrl.Result{}) {
+		t.Errorf("NSAnnotation_EnabledFalse_Suppressed: expected empty ctrl.Result{}, got %v", result)
+	}
+
+	var list v1alpha1.RemediationJobList
+	if err := c.List(context.Background(), &list, client.InNamespace(agentNamespace)); err != nil {
+		t.Fatalf("list error: %v", err)
+	}
+	if len(list.Items) != 0 {
+		t.Errorf("NSAnnotation_EnabledFalse_Suppressed: expected 0 RemediationJobs, got %d", len(list.Items))
+	}
+}
+
+func TestNSAnnotation_SkipUntilFuture_Suppressed(t *testing.T) {
+	futureDate := time.Now().AddDate(1, 0, 0).UTC().Format("2006-01-02")
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "production",
+			Annotations: map[string]string{
+				domain.AnnotationSkipUntil: futureDate,
+			},
+		},
+	}
+	watched := makeWatchedObject("r1", "production")
+	c := newTestClient(ns, watched)
+
+	p := &fakeSourceProvider{
+		name:       "native",
+		objectType: &corev1.ConfigMap{},
+		finding:    crashLoopFinding("production"),
+	}
+	r := newTestReconciler(p, c)
+
+	result, err := r.Reconcile(context.Background(), reqFor("r1", "production"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != (ctrl.Result{}) {
+		t.Errorf("NSAnnotation_SkipUntilFuture_Suppressed: expected empty ctrl.Result{}, got %v", result)
+	}
+
+	var list v1alpha1.RemediationJobList
+	if err := c.List(context.Background(), &list, client.InNamespace(agentNamespace)); err != nil {
+		t.Fatalf("list error: %v", err)
+	}
+	if len(list.Items) != 0 {
+		t.Errorf("NSAnnotation_SkipUntilFuture_Suppressed: expected 0 RemediationJobs, got %d", len(list.Items))
+	}
+}
+
+func TestNSAnnotation_SkipUntilPast_Proceeds(t *testing.T) {
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "production",
+			Annotations: map[string]string{
+				domain.AnnotationSkipUntil: "2020-01-01",
+			},
+		},
+	}
+	watched := makeWatchedObject("r1", "production")
+	c := newTestClient(ns, watched)
+
+	p := &fakeSourceProvider{
+		name:       "native",
+		objectType: &corev1.ConfigMap{},
+		finding:    crashLoopFinding("production"),
+	}
+	r := newTestReconciler(p, c)
+
+	_, err := r.Reconcile(context.Background(), reqFor("r1", "production"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var list v1alpha1.RemediationJobList
+	if err := c.List(context.Background(), &list, client.InNamespace(agentNamespace)); err != nil {
+		t.Fatalf("list error: %v", err)
+	}
+	if len(list.Items) != 1 {
+		t.Errorf("NSAnnotation_SkipUntilPast_Proceeds: expected 1 RemediationJob, got %d", len(list.Items))
+	}
+}
+
+func TestNSAnnotation_NamespaceNotFound_Proceeds(t *testing.T) {
+	// No Namespace object in the fake client — only the watched ConfigMap.
+	watched := makeWatchedObject("r1", "production")
+	c := newTestClient(watched)
+
+	p := &fakeSourceProvider{
+		name:       "native",
+		objectType: &corev1.ConfigMap{},
+		finding:    crashLoopFinding("production"),
+	}
+	r := newTestReconciler(p, c)
+
+	_, err := r.Reconcile(context.Background(), reqFor("r1", "production"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var list v1alpha1.RemediationJobList
+	if err := c.List(context.Background(), &list, client.InNamespace(agentNamespace)); err != nil {
+		t.Fatalf("list error: %v", err)
+	}
+	if len(list.Items) != 1 {
+		t.Errorf("NSAnnotation_NamespaceNotFound_Proceeds: expected 1 RemediationJob (NotFound treated as no annotation), got %d", len(list.Items))
+	}
+}
+
+func TestNSAnnotation_ClusterScoped_Exempt(t *testing.T) {
+	// Even though a suppression-annotated Namespace object exists in the client,
+	// a cluster-scoped finding (Namespace == "") must bypass the gate entirely.
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "some-ns",
+			Annotations: map[string]string{
+				domain.AnnotationEnabled: "false",
+			},
+		},
+	}
+	watched := makeWatchedObject("r1", "")
+	c := newTestClient(ns, watched)
+
+	// Cluster-scoped finding: Namespace is empty string (like a Node finding).
+	clusterFinding := &domain.Finding{
+		Kind:         "Node",
+		Name:         "node-1",
+		Namespace:    "",
+		ParentObject: "node-1",
+		Errors:       `[{"text":"DiskPressure"}]`,
+		Details:      "Node has disk pressure",
+	}
+	p := &fakeSourceProvider{
+		name:       "native",
+		objectType: &corev1.ConfigMap{},
+		finding:    clusterFinding,
+	}
+	r := newTestReconciler(p, c)
+
+	_, err := r.Reconcile(context.Background(), reqFor("r1", ""))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var list v1alpha1.RemediationJobList
+	if err := c.List(context.Background(), &list, client.InNamespace(agentNamespace)); err != nil {
+		t.Fatalf("list error: %v", err)
+	}
+	if len(list.Items) != 1 {
+		t.Errorf("NSAnnotation_ClusterScoped_Exempt: expected 1 RemediationJob (gate bypassed for cluster-scoped), got %d", len(list.Items))
+	}
+}
+
+// TestNSAnnotation_EnabledFalse_LogsDebug verifies that when the Namespace carries
+// mendabot.io/enabled="false", Reconcile returns ctrl.Result{} with no error, creates no
+// RemediationJob, and emits exactly one Debug-level log entry with the expected structured
+// fields (provider, namespace, kind, name).
+func TestNSAnnotation_EnabledFalse_LogsDebug(t *testing.T) {
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "production",
+			Annotations: map[string]string{
+				domain.AnnotationEnabled: "false",
+			},
+		},
+	}
+	watched := makeWatchedObject("r1", "production")
+	c := newTestClient(ns, watched)
+
+	p := &fakeSourceProvider{
+		name:       "native",
+		objectType: &corev1.ConfigMap{},
+		finding:    crashLoopFinding("production"),
+	}
+	logger, logs := newObserverDebugLogger()
+	r := &provider.SourceProviderReconciler{
+		Client:   c,
+		Scheme:   newTestScheme(),
+		Cfg:      config.Config{AgentNamespace: agentNamespace},
+		Provider: p,
+		Log:      logger,
+	}
+
+	result, err := r.Reconcile(context.Background(), reqFor("r1", "production"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != (ctrl.Result{}) {
+		t.Errorf("NSAnnotation_EnabledFalse_LogsDebug: expected empty ctrl.Result{}, got %v", result)
+	}
+
+	var list v1alpha1.RemediationJobList
+	if err := c.List(context.Background(), &list, client.InNamespace(agentNamespace)); err != nil {
+		t.Fatalf("list error: %v", err)
+	}
+	if len(list.Items) != 0 {
+		t.Errorf("NSAnnotation_EnabledFalse_LogsDebug: expected 0 RemediationJobs, got %d", len(list.Items))
+	}
+
+	debugEntries := logs.FilterLevelExact(zapcore.DebugLevel).All()
+	if len(debugEntries) != 1 {
+		t.Fatalf("NSAnnotation_EnabledFalse_LogsDebug: expected exactly 1 Debug log entry, got %d (all entries: %v)", len(debugEntries), logs.All())
+	}
+
+	cm := debugEntries[0].ContextMap()
+
+	providerVal, hasProvider := cm["provider"]
+	if !hasProvider {
+		t.Error("NSAnnotation_EnabledFalse_LogsDebug: expected 'provider' field in debug log entry")
+	} else if providerVal == "" {
+		t.Error("NSAnnotation_EnabledFalse_LogsDebug: expected non-empty 'provider' field in debug log entry")
+	}
+
+	nsVal, hasNS := cm["namespace"]
+	if !hasNS {
+		t.Error("NSAnnotation_EnabledFalse_LogsDebug: expected 'namespace' field in debug log entry")
+	} else if nsVal != "production" {
+		t.Errorf("NSAnnotation_EnabledFalse_LogsDebug: expected namespace=production, got %v", nsVal)
+	}
+
+	kindVal, hasKind := cm["kind"]
+	if !hasKind {
+		t.Error("NSAnnotation_EnabledFalse_LogsDebug: expected 'kind' field in debug log entry")
+	} else if kindVal == "" {
+		t.Error("NSAnnotation_EnabledFalse_LogsDebug: expected non-empty 'kind' field in debug log entry")
+	}
+
+	nameVal, hasName := cm["name"]
+	if !hasName {
+		t.Error("NSAnnotation_EnabledFalse_LogsDebug: expected 'name' field in debug log entry")
+	} else if nameVal == "" {
+		t.Error("NSAnnotation_EnabledFalse_LogsDebug: expected non-empty 'name' field in debug log entry")
+	}
+}
+
+// TestNSAnnotation_NamespaceGetError_ReturnsError verifies that when the Kubernetes API
+// returns a non-NotFound error for the Namespace lookup, Reconcile propagates the error
+// and creates no RemediationJob.
+func TestNSAnnotation_NamespaceGetError_ReturnsError(t *testing.T) {
+	watched := makeWatchedObject("r1", "production")
+	s := newTestScheme()
+	c := fake.NewClientBuilder().
+		WithScheme(s).
+		WithStatusSubresource(&v1alpha1.RemediationJob{}).
+		WithObjects(watched).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+				if _, ok := obj.(*corev1.Namespace); ok {
+					return fmt.Errorf("simulated API error")
+				}
+				return c.Get(ctx, key, obj, opts...)
+			},
+		}).
+		Build()
+
+	p := &fakeSourceProvider{
+		name:       "native",
+		objectType: &corev1.ConfigMap{},
+		finding:    crashLoopFinding("production"),
+	}
+	r := &provider.SourceProviderReconciler{
+		Client:   c,
+		Scheme:   s,
+		Cfg:      config.Config{AgentNamespace: agentNamespace},
+		Provider: p,
+	}
+
+	_, err := r.Reconcile(context.Background(), reqFor("r1", "production"))
+	if err == nil {
+		t.Error("NSAnnotation_NamespaceGetError_ReturnsError: expected non-nil error when Namespace Get returns non-NotFound error, got nil")
+	}
+
+	var list v1alpha1.RemediationJobList
+	if listErr := c.List(context.Background(), &list, client.InNamespace(agentNamespace)); listErr != nil {
+		t.Fatalf("list error: %v", listErr)
+	}
+	if len(list.Items) != 0 {
+		t.Errorf("NSAnnotation_NamespaceGetError_ReturnsError: expected 0 RemediationJobs on error path, got %d", len(list.Items))
 	}
 }
 

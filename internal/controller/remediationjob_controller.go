@@ -85,6 +85,9 @@ func (r *RemediationJobReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	case v1alpha1.PhaseFailed:
 		return ctrl.Result{}, nil
 
+	case v1alpha1.PhasePermanentlyFailed:
+		return ctrl.Result{}, nil
+
 	case v1alpha1.PhaseCancelled:
 		return ctrl.Result{}, nil
 	}
@@ -102,21 +105,50 @@ func (r *RemediationJobReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		newPhase := syncPhaseFromJob(job)
 		rjobCopy := rjob.DeepCopyObject().(*v1alpha1.RemediationJob)
 		rjob.Status.Phase = newPhase
+		var effectiveMaxRetries int32
 		if newPhase == v1alpha1.PhaseSucceeded || newPhase == v1alpha1.PhaseFailed {
 			if rjob.Status.CompletedAt == nil {
 				now := metav1.Now()
 				rjob.Status.CompletedAt = &now
 			}
-			condType := v1alpha1.ConditionJobComplete
 			if newPhase == v1alpha1.PhaseFailed {
-				condType = v1alpha1.ConditionJobFailed
+				// Only increment RetryCount when transitioning *into* Failed for the
+				// first time (not on subsequent reconciles of an already-Failed rjob).
+				// rjobCopy holds the pre-mutation phase; rjob.Status.Phase has already
+				// been set to newPhase above, so compare against the copy.
+				if rjobCopy.Status.Phase != v1alpha1.PhaseFailed {
+					rjob.Status.RetryCount++
+				}
+				maxRetries := rjob.Spec.MaxRetries
+				if maxRetries <= 0 {
+					maxRetries = 3
+				}
+				effectiveMaxRetries = maxRetries
+				if rjob.Status.RetryCount >= maxRetries {
+					rjob.Status.Phase = v1alpha1.PhasePermanentlyFailed
+					apimeta.SetStatusCondition(&rjob.Status.Conditions, metav1.Condition{
+						Type:               v1alpha1.ConditionPermanentlyFailed,
+						Status:             metav1.ConditionTrue,
+						Reason:             "RetryCapReached",
+						Message:            fmt.Sprintf("RetryCount %d reached MaxRetries %d", rjob.Status.RetryCount, maxRetries),
+						LastTransitionTime: metav1.Now(),
+					})
+				} else {
+					apimeta.SetStatusCondition(&rjob.Status.Conditions, metav1.Condition{
+						Type:               v1alpha1.ConditionJobFailed,
+						Status:             metav1.ConditionTrue,
+						Reason:             string(newPhase),
+						LastTransitionTime: metav1.Now(),
+					})
+				}
+			} else {
+				apimeta.SetStatusCondition(&rjob.Status.Conditions, metav1.Condition{
+					Type:               v1alpha1.ConditionJobComplete,
+					Status:             metav1.ConditionTrue,
+					Reason:             string(newPhase),
+					LastTransitionTime: metav1.Now(),
+				})
 			}
-			apimeta.SetStatusCondition(&rjob.Status.Conditions, metav1.Condition{
-				Type:               condType,
-				Status:             metav1.ConditionTrue,
-				Reason:             string(newPhase),
-				LastTransitionTime: metav1.Now(),
-			})
 		}
 		if rjob.Status.JobRef == "" {
 			rjob.Status.JobRef = job.Name
@@ -125,18 +157,36 @@ func (r *RemediationJobReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			return ctrl.Result{}, err
 		}
 		if r.Log != nil && (newPhase == v1alpha1.PhaseSucceeded || newPhase == v1alpha1.PhaseFailed) {
-			event := "job.succeeded"
-			if newPhase == v1alpha1.PhaseFailed {
-				event = "job.failed"
+			switch {
+			case newPhase == v1alpha1.PhaseSucceeded:
+				r.Log.Info("agent job terminal",
+					zap.Bool("audit", true),
+					zap.String("event", "job.succeeded"),
+					zap.String("remediationJob", rjob.Name),
+					zap.String("job", job.Name),
+					zap.String("namespace", rjob.Namespace),
+					zap.String("prRef", rjob.Status.PRRef),
+				)
+			case rjob.Status.Phase == v1alpha1.PhasePermanentlyFailed:
+				r.Log.Info("agent job permanently failed",
+					zap.Bool("audit", true),
+					zap.String("event", "job.permanently_failed"),
+					zap.String("remediationJob", rjob.Name),
+					zap.String("job", job.Name),
+					zap.String("namespace", rjob.Namespace),
+					zap.Int32("retryCount", rjob.Status.RetryCount),
+					zap.Int32("maxRetries", effectiveMaxRetries),
+				)
+			case newPhase == v1alpha1.PhaseFailed:
+				r.Log.Info("agent job terminal",
+					zap.Bool("audit", true),
+					zap.String("event", "job.failed"),
+					zap.String("remediationJob", rjob.Name),
+					zap.String("job", job.Name),
+					zap.String("namespace", rjob.Namespace),
+					zap.String("prRef", rjob.Status.PRRef),
+				)
 			}
-			r.Log.Info("agent job terminal",
-				zap.Bool("audit", true),
-				zap.String("event", event),
-				zap.String("remediationJob", rjob.Name),
-				zap.String("job", job.Name),
-				zap.String("namespace", rjob.Namespace),
-				zap.String("prRef", rjob.Status.PRRef),
-			)
 		}
 		return ctrl.Result{}, nil
 	}

@@ -192,13 +192,23 @@ func (r *SourceProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		if rjob.Spec.Fingerprint != fp {
 			continue
 		}
-		if rjob.Status.Phase != v1alpha1.PhaseFailed {
+		switch rjob.Status.Phase {
+		case v1alpha1.PhasePermanentlyFailed:
+			if r.Log != nil {
+				r.Log.Info("RemediationJob permanently failed; suppressing re-dispatch",
+					zap.Bool("audit", true),
+					zap.String("event", "remediationjob.permanently_failed_suppressed"),
+					zap.String("remediationJob", rjob.Name),
+					zap.String("fingerprint", fp[:12]),
+				)
+			}
 			return ctrl.Result{}, nil
-		}
-		// Failed RemediationJob with the same fingerprint — delete it so a new
-		// investigation can be dispatched.
-		if delErr := r.Delete(ctx, rjob); delErr != nil && !apierrors.IsNotFound(delErr) {
-			return ctrl.Result{}, delErr
+		case v1alpha1.PhaseFailed:
+			if delErr := r.Delete(ctx, rjob); delErr != nil && !apierrors.IsNotFound(delErr) {
+				return ctrl.Result{}, delErr
+			}
+		default:
+			return ctrl.Result{}, nil
 		}
 	}
 
@@ -258,6 +268,7 @@ func (r *SourceProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			GitOpsManifestRoot: r.Cfg.GitOpsManifestRoot,
 			AgentImage:         r.Cfg.AgentImage,
 			AgentSA:            agentSA,
+			MaxRetries:         r.Cfg.MaxInvestigationRetries,
 		},
 	}
 

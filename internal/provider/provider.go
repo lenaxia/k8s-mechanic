@@ -166,10 +166,6 @@ func (r *SourceProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 	}
 
-	// Namespace filter: skip findings from namespaces that are outside the
-	// configured allowlist (WatchNamespaces) or inside the denylist
-	// (ExcludeNamespaces). Cluster-scoped providers (e.g. NodeProvider) always
-	// set finding.Namespace = "" and are unconditionally exempt.
 	if finding.Namespace != "" {
 		if len(r.Cfg.WatchNamespaces) > 0 {
 			allowed := false

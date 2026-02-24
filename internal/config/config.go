@@ -36,15 +36,8 @@ type Config struct {
 	InjectionDetectionAction string   // INJECTION_DETECTION_ACTION — "log" (default) or "suppress"
 	AgentRBACScope           string   // AGENT_RBAC_SCOPE — "cluster" (default) or "namespace"
 	AgentWatchNamespaces     []string // AGENT_WATCH_NAMESPACES — required when scope is "namespace"
-	// WatchNamespaces limits reconciliation to the listed namespaces.
-	// When nil (WATCH_NAMESPACES not set), all namespaces are watched.
-	// Cluster-scoped resources (e.g. Nodes) are always exempt from this filter.
-	WatchNamespaces []string // WATCH_NAMESPACES — default nil (allow all)
-	// ExcludeNamespaces suppresses RemediationJob creation for findings in these
-	// namespaces. Applied after WatchNamespaces. When nil (EXCLUDE_NAMESPACES not
-	// set), no namespaces are excluded.
-	// Cluster-scoped resources (e.g. Nodes) are always exempt from this filter.
-	ExcludeNamespaces []string // EXCLUDE_NAMESPACES — default nil (deny none)
+	WatchNamespaces          []string // WATCH_NAMESPACES — default nil (allow all)
+	ExcludeNamespaces        []string // EXCLUDE_NAMESPACES — default nil (deny none)
 	// MaxInvestigationRetries is the maximum number of times a RemediationJob's
 	// owned batch/v1 Job may fail before the RemediationJob is permanently
 	// tombstoned. Populated from MAX_INVESTIGATION_RETRIES env var; default 3.

@@ -1964,6 +1964,68 @@ func TestNSFilter_WatchNoMatch_LogsDebug(t *testing.T) {
 	}
 }
 
+// TestNSFilter_ExcludeMatch_LogsDebug verifies that when ExcludeNamespaces includes the
+// finding's namespace, the reconciler emits a Debug log entry containing "ExcludeNamespaces"
+// with namespace, provider, kind, and name fields, and no RemediationJob is created.
+func TestNSFilter_ExcludeMatch_LogsDebug(t *testing.T) {
+	finding := makePodFinding("production")
+	p := &fakeSourceProvider{name: "native", objectType: &corev1.ConfigMap{}, finding: finding}
+	obj := makeWatchedObject("r1", "default")
+	c := newTestClient(obj)
+	logger, logs := newObserverDebugLogger()
+	r := &provider.SourceProviderReconciler{
+		Client: c,
+		Scheme: newTestScheme(),
+		Cfg: config.Config{
+			AgentNamespace:    agentNamespace,
+			ExcludeNamespaces: []string{"production"},
+		},
+		Provider: p,
+		Log:      logger,
+	}
+
+	_, err := r.Reconcile(context.Background(), reqFor("r1", "default"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var found bool
+	for _, entry := range logs.All() {
+		if entry.Level != zapcore.DebugLevel {
+			continue
+		}
+		if !strings.Contains(entry.Message, "ExcludeNamespaces") {
+			continue
+		}
+		cm := entry.ContextMap()
+		if cm["namespace"] != "production" {
+			continue
+		}
+		if cm["provider"] == "" {
+			t.Errorf("expected non-empty provider field in namespace filter debug entry")
+		}
+		if cm["kind"] == "" {
+			t.Errorf("expected non-empty kind field in namespace filter debug entry")
+		}
+		if cm["name"] == "" {
+			t.Errorf("expected non-empty name field in namespace filter debug entry")
+		}
+		found = true
+		break
+	}
+	if !found {
+		t.Errorf("expected Debug log entry with message containing 'ExcludeNamespaces' and namespace='production', got entries: %v", logs.All())
+	}
+
+	var list v1alpha1.RemediationJobList
+	if err := c.List(context.Background(), &list, client.InNamespace(agentNamespace)); err != nil {
+		t.Fatalf("list error: %v", err)
+	}
+	if len(list.Items) != 0 {
+		t.Errorf("expected 0 RemediationJobs when namespace excluded, got %d", len(list.Items))
+	}
+}
+
 // TestNSFilter_ExcludeMatch_NilLog_NoPanic verifies that when Log is nil and
 // ExcludeNamespaces blocks the finding's namespace, the reconciler does not panic,
 // returns no error, and creates no RemediationJob.
@@ -1995,6 +2057,40 @@ func TestNSFilter_ExcludeMatch_NilLog_NoPanic(t *testing.T) {
 	}
 	if len(list.Items) != 0 {
 		t.Errorf("expected 0 RemediationJobs when namespace excluded and Log=nil, got %d", len(list.Items))
+	}
+}
+
+// TestNSFilter_WatchNoMatch_NilLog_NoPanic verifies that when Log is nil and
+// WatchNamespaces does not include the finding's namespace, the reconciler does not panic,
+// returns no error, and creates no RemediationJob.
+func TestNSFilter_WatchNoMatch_NilLog_NoPanic(t *testing.T) {
+	finding := makePodFinding("production")
+	p := &fakeSourceProvider{name: "native", objectType: &corev1.ConfigMap{}, finding: finding}
+	obj := makeWatchedObject("r1", "default")
+	c := newTestClient(obj)
+	r := &provider.SourceProviderReconciler{
+		Client: c,
+		Scheme: newTestScheme(),
+		Cfg: config.Config{
+			AgentNamespace:  agentNamespace,
+			WatchNamespaces: []string{"staging"},
+		},
+		Provider: p,
+		Log:      nil,
+	}
+
+	// Must not panic.
+	_, err := r.Reconcile(context.Background(), reqFor("r1", "default"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var list v1alpha1.RemediationJobList
+	if err := c.List(context.Background(), &list, client.InNamespace(agentNamespace)); err != nil {
+		t.Fatalf("list error: %v", err)
+	}
+	if len(list.Items) != 0 {
+		t.Errorf("expected 0 RemediationJobs when namespace not in WatchNamespaces and Log=nil, got %d", len(list.Items))
 	}
 }
 

@@ -1,0 +1,104 @@
+# Story 01: Schema Foundations
+
+**Epic:** [epic11-self-remediation-cascade](README.md)
+**Priority:** Critical
+**Status:** Not Started
+**Estimated Effort:** 1 hour
+
+---
+
+## User Story
+
+As a **mendabot developer**, I want `ChainDepth` carried from a Finding through
+to the `RemediationJobSpec` and the CRD testdata, so that all downstream
+stories have a stable, typed field to read and write.
+
+---
+
+## Problem
+
+`domain.Finding` and `api/v1alpha1.FindingSpec` have no `ChainDepth` field.
+Without these additions no other story in this epic can be implemented.
+
+---
+
+## Acceptance Criteria
+
+- [ ] `domain.Finding` in `internal/domain/provider.go` has a new field:
+  ```go
+  ChainDepth int
+  ```
+- [ ] `FindingSpec` in `api/v1alpha1/remediationjob_types.go` has a new field:
+  ```go
+  ChainDepth int32 `json:"chainDepth,omitempty"`
+  ```
+- [ ] `RemediationJob.DeepCopyInto` in `api/v1alpha1/remediationjob_types.go`
+  copies `Spec.Finding.ChainDepth` (the struct is copied by value already; verify
+  this is still true after the addition and add an explicit copy if a pointer is
+  ever introduced).
+- [ ] `testdata/crds/remediationjob_crd.yaml` has the new field inside the
+  `finding.properties` block (after `details: {type: string}` at line 77):
+  ```yaml
+  chainDepth: {type: integer}
+  ```
+  The envtest suite in `internal/controller/suite_test.go` loads CRDs from
+  `../../testdata/crds` (resolving to `testdata/crds/` at repo root). This is
+  also the path used by `internal/provider/suite_test.go`.
+- [ ] `SourceProviderReconciler` in `internal/provider/provider.go` maps the
+  new field when building `RemediationJobSpec.Finding`:
+  ```go
+  ChainDepth: int32(finding.ChainDepth),
+  ```
+  This is the only change required in `provider.go` for this story.
+- [ ] All existing tests still pass (`go test -timeout 30s -race ./...`).
+
+---
+
+## What this story does NOT do
+
+- No detection logic (STORY_02).
+- No enforcement / gating logic (STORY_03).
+- No circuit breaker (STORY_04).
+
+---
+
+## Files to modify
+
+| File | Change |
+|------|--------|
+| `internal/domain/provider.go` | Add `ChainDepth int` to `Finding` |
+| `api/v1alpha1/remediationjob_types.go` | Add `ChainDepth int32` to `FindingSpec` |
+| `testdata/crds/remediationjob_crd.yaml` | Add `chainDepth: {type: integer}` inside the `finding.properties` block |
+| `internal/provider/provider.go` | Map `finding.ChainDepth` into `RemediationJobSpec.Finding` |
+
+---
+
+## Testing Requirements
+
+**Unit tests** (`internal/domain/provider_test.go` or nearest appropriate file):
+- `FindingFingerprint` is unaffected by `ChainDepth` (depth is not part of the
+  deduplication key — two findings that differ only in chain depth must produce
+  the same fingerprint).
+
+**Integration tests** (`internal/controller/`):
+- Existing controller integration tests must still pass with no changes.
+- Add one case: create a `RemediationJob` with `ChainDepth: 2` and verify the
+  field survives a round-trip through the envtest API server (confirming the CRD
+  schema accepts it).
+
+---
+
+## Dependencies
+
+**Depends on:** none (this story is the prerequisite for all others)
+**Blocks:** STORY_02, STORY_03, STORY_04
+
+---
+
+## Definition of Done
+
+- [ ] All tests pass with `-race`
+- [ ] `go vet` clean
+- [ ] `go build ./...` clean
+- [ ] CRD testdata updated and envtest round-trip test added
+- [ ] `provider.go` mapping updated

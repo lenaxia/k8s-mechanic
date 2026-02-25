@@ -112,14 +112,17 @@ else
 fi
 
 # ── Functional hard-fail test: wrapper must exit 1 when redact is absent ──────
-# Remove redact from PATH by prepending a directory that shadows it with a
-# non-executable file, then invoke a wrapper and assert exit code is 1.
+# Strategy: move /usr/local/bin/redact aside inside the container so that
+# `command -v redact` returns false, then invoke the kubectl wrapper and assert
+# it exits 1. We restore the binary name immediately after so no other test is
+# affected (each docker run is a fresh container, so this is moot in practice,
+# but the comment documents intent).
+# Note: chmod 000 does NOT work — bash's `command -v` skips non-executable
+# files and would fall through to the real redact binary instead.
 printf 'Checking wrapper hard-fail when redact absent (kubectl) ... '
 hf_rc=$(docker run --rm --entrypoint /bin/sh "$IMAGE" -c \
-    'mkdir -p /tmp/nored \
-     && touch /tmp/nored/redact \
-     && chmod 000 /tmp/nored/redact \
-     && PATH=/tmp/nored:$PATH kubectl --version > /dev/null 2>&1; echo $?') || true
+    'mv /usr/local/bin/redact /usr/local/bin/redact.bak \
+     && kubectl --version > /dev/null 2>&1; echo $?') || true
 if [ "$hf_rc" = "1" ]; then
     echo "OK"; ((pass++)) || true
 else

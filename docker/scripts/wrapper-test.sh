@@ -92,12 +92,39 @@ for tool in kubectl helm flux gh sops talosctl yq stern kubeconform kustomize ag
         "grep -q 'trap' /usr/local/bin/${tool} && \
          grep -q '_rc=\$?' /usr/local/bin/${tool} && \
          grep -q 'redact < ' /usr/local/bin/${tool} && \
-         grep -q 'command -v redact' /usr/local/bin/${tool}"; then
+         grep -q 'command -v redact' /usr/local/bin/${tool} && \
+         grep -q 'exit 1' /usr/local/bin/${tool} && \
+         grep -q '_rr=\$?' /usr/local/bin/${tool}"; then
         echo "OK"; ((pass++)) || true
     else
         echo "FAIL"; ((fail++)) || true
     fi
 done
+
+# gh wrapper: verify it calls /usr/bin/gh specifically (not gh.real)
+printf 'Checking gh wrapper calls /usr/bin/gh ... '
+if docker run --rm --entrypoint /bin/sh "$IMAGE" -c \
+    "grep -qF '/usr/bin/gh' /usr/local/bin/gh && \
+     ! grep -qF 'gh.real' /usr/local/bin/gh"; then
+    echo "OK"; ((pass++)) || true
+else
+    echo "FAIL"; ((fail++)) || true
+fi
+
+# ── Functional hard-fail test: wrapper must exit 1 when redact is absent ──────
+# Remove redact from PATH by prepending a directory that shadows it with a
+# non-executable file, then invoke a wrapper and assert exit code is 1.
+printf 'Checking wrapper hard-fail when redact absent (kubectl) ... '
+hf_rc=$(docker run --rm --entrypoint /bin/sh "$IMAGE" -c \
+    'mkdir -p /tmp/nored \
+     && touch /tmp/nored/redact \
+     && chmod 000 /tmp/nored/redact \
+     && PATH=/tmp/nored:$PATH kubectl --version > /dev/null 2>&1; echo $?') || true
+if [ "$hf_rc" = "1" ]; then
+    echo "OK"; ((pass++)) || true
+else
+    echo "FAIL (got exit code: $hf_rc, expected: 1)"; ((fail++)) || true
+fi
 
 # ── Functional exit code passthrough tests ────────────────────────────────────
 # Only for tools that use <tool>.real (PATH-interceptable).

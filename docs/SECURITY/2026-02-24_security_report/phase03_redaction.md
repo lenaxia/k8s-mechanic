@@ -56,7 +56,7 @@ Covers RSA, EC, DSA, OPENSSH, and PKCS8 (`PRIVATE KEY`) formats. Public key head
 
 **P-007 — X-API-Key HTTP header pattern added:**
 ```go
-{regexp.MustCompile(`(?i)(x-api-key\s*[=:]\t*)\S+`), `${1}[REDACTED]`},
+{regexp.MustCompile(`(?i)(x-api-key\s*[=:]\s*)\S+`), `${1}[REDACTED]`},
 ```
 Covers `X-API-Key: value` regardless of value length. Complements the existing `api[_-]?key` pattern which required assignment syntax.
 

@@ -14,4 +14,6 @@ trap 'rm -f "$_tmpfile"' EXIT
 _rc=$?
 
 redact < "$_tmpfile"
-exit $_rc
+_rr=$?
+[ "$_rr" -ne 0 ] && exit "$_rr"
+exit "$_rc"

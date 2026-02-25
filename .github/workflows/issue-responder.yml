@@ -36,6 +36,7 @@ jobs:
         with:
           model: openai-compatible/default
           use_github_token: "true"
+          share: "false"
           prompt: |
             You are an AI assistant for the k8s-mendabot repository. Analyze this GitHub issue and take the appropriate action.
 
@@ -91,4 +92,5 @@ jobs:
         with:
           model: openai-compatible/default
           use_github_token: "true"
+          share: "false"
           mentions: /ai

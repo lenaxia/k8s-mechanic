@@ -86,6 +86,7 @@ jobs:
         with:
           model: openai-compatible/default
           use_github_token: "true"
+          share: "false"
           prompt: |
             You are an AI assistant that analyzes Renovatebot pull requests for k8s-mendabot, a Kubernetes operator (Go/controller-runtime) that watches cluster events, calls an LLM to diagnose issues, and optionally remediates them via RemediationJob CRDs.
 

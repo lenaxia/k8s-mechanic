@@ -1193,3 +1193,13 @@ func TestFromEnv_SelfRemediationCooldown_Negative(t *testing.T) {
 		t.Error("expected error for negative SELF_REMEDIATION_COOLDOWN_SECONDS, got nil")
 	}
 }
+
+func TestFromEnv_SelfRemediationCooldown_NonInteger(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("SELF_REMEDIATION_COOLDOWN_SECONDS", "foo")
+
+	_, err := config.FromEnv()
+	if err == nil {
+		t.Error("expected error for non-integer SELF_REMEDIATION_COOLDOWN_SECONDS, got nil")
+	}
+}

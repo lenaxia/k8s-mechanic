@@ -2842,6 +2842,10 @@ func TestReconciler_SelfRemediation_DepthWithinLimit_PassesThrough(t *testing.T)
 		finding:    makeSelfRemediationFinding(1),
 	}
 	r := newSelfRemediationReconciler(p, c, 2, nil)
+	r.Cfg.GitOpsRepo = "org/repo"
+	r.Cfg.GitOpsManifestRoot = "deploy"
+	r.Cfg.AgentImage = "mendabot-agent:test"
+	r.Cfg.AgentSA = "mendabot-agent"
 
 	_, err := r.Reconcile(context.Background(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: obj.Name, Namespace: obj.Namespace},
@@ -2849,7 +2853,14 @@ func TestReconciler_SelfRemediation_DepthWithinLimit_PassesThrough(t *testing.T)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// Depth 1 <= maxDepth 2: should pass — no CB, no error
+	// Depth 1 <= maxDepth 2: should pass gate and create RJob
+	var rjobList v1alpha1.RemediationJobList
+	if listErr := c.List(context.Background(), &rjobList, client.InNamespace(agentNamespace)); listErr != nil {
+		t.Fatalf("list: %v", listErr)
+	}
+	if len(rjobList.Items) == 0 {
+		t.Error("expected RemediationJob created when depth within limit, got none")
+	}
 }
 
 func TestReconciler_SelfRemediation_DepthAtLimit_PassesThrough(t *testing.T) {
@@ -2861,6 +2872,10 @@ func TestReconciler_SelfRemediation_DepthAtLimit_PassesThrough(t *testing.T) {
 		finding:    makeSelfRemediationFinding(2),
 	}
 	r := newSelfRemediationReconciler(p, c, 2, nil)
+	r.Cfg.GitOpsRepo = "org/repo"
+	r.Cfg.GitOpsManifestRoot = "deploy"
+	r.Cfg.AgentImage = "mendabot-agent:test"
+	r.Cfg.AgentSA = "mendabot-agent"
 
 	_, err := r.Reconcile(context.Background(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: obj.Name, Namespace: obj.Namespace},
@@ -2868,7 +2883,14 @@ func TestReconciler_SelfRemediation_DepthAtLimit_PassesThrough(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// Depth 2 == maxDepth 2: should pass
+	// Depth 2 == maxDepth 2: should pass gate and create RJob
+	var rjobList v1alpha1.RemediationJobList
+	if listErr := c.List(context.Background(), &rjobList, client.InNamespace(agentNamespace)); listErr != nil {
+		t.Fatalf("list: %v", listErr)
+	}
+	if len(rjobList.Items) == 0 {
+		t.Error("expected RemediationJob created when depth at limit, got none")
+	}
 }
 
 func TestReconciler_SelfRemediation_DepthExceedsLimit_Suppressed(t *testing.T) {

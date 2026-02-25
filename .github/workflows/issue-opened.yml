@@ -1,0 +1,55 @@
+name: Issue Opened
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  respond:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Run OpenCode
+        uses: anomalyco/opencode/github@latest
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_API_BASE: ${{ secrets.OPENAI_API_BASE }}
+          OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          model: openai-compatible/default
+          use_github_token: "true"
+          share: "false"
+          prompt: |
+            You are an AI assistant for the k8s-mendabot repository. A new GitHub issue has been opened. Analyze it and take the appropriate action.
+
+            Repository: k8s-mendabot — a Kubernetes operator (Go/controller-runtime) that watches cluster events, uses an LLM to diagnose issues, and optionally remediates them via RemediationJob CRDs. Single maintainer: @lenaxia.
+
+            Key directories:
+            - cmd/               — operator entrypoints
+            - internal/          — controller, agent, jobbuilder, redact wrappers
+            - api/               — CRD types (RemediationJob, MendabotConfig)
+            - charts/mendabot/   — Helm chart
+            - docs/              — architecture, security docs (THREAT_MODEL, pentest findings)
+            - docker/            — Dockerfiles, smoke/wrapper test scripts
+            - .github/workflows/ — CI/CD pipelines
+
+            Rules:
+            1. Always post a comment on the issue with your response before finishing.
+            2. For any code or file changes: create a feature branch and open a PR — never commit directly to main. Branch naming: feat/issue-{number}-<short-description>. PR body must include "Closes #{number}".
+            3. Never handle or create secrets.
+            4. Flag any change touching internal/redact/, RBAC, CRD schema, or secrets handling as security-sensitive.
+            5. If the request is ambiguous, ask for clarification in a comment rather than guessing.
+            6. Use the checked-out repository to read source files and understand current implementation before answering questions or proposing changes.
+
+            Analyze this issue, determine what action to take (answer a question, implement a change, ask for clarification), and execute it.

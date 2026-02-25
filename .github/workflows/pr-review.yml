@@ -1,0 +1,106 @@
+name: PR Review
+
+on:
+  pull_request:
+    types: [opened]
+
+jobs:
+  review:
+    # Skip renovate[bot] PRs — handled by renovate-analysis.yml
+    if: github.event.pull_request.user.login != 'renovate[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Run OpenCode
+        uses: anomalyco/opencode/github@latest
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_API_BASE: ${{ secrets.OPENAI_API_BASE }}
+          OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          model: openai-compatible/default
+          use_github_token: "true"
+          share: "false"
+          prompt: |
+            You are a code reviewer for the k8s-mendabot repository. A new pull request has been opened. Perform a thorough review and post your findings as a PR review comment.
+
+            Repository: k8s-mendabot — a Kubernetes operator (Go/controller-runtime) that watches cluster events, uses an LLM to diagnose issues, and optionally remediates them via RemediationJob CRDs. Single maintainer: @lenaxia.
+
+            Key directories:
+            - cmd/               — operator entrypoints
+            - internal/          — controller, agent, jobbuilder, redact wrappers
+            - api/               — CRD types (RemediationJob, MendabotConfig)
+            - charts/mendabot/   — Helm chart
+            - docs/SECURITY/     — THREAT_MODEL.md, pentest findings
+            - docker/            — Dockerfiles, smoke/wrapper test scripts
+
+            Review checklist — assess every item and call out failures explicitly:
+
+            CORRECTNESS
+            - Does the code do what the PR description claims?
+            - Are there logic errors, off-by-one errors, or incorrect conditionals?
+            - Are error paths handled and errors propagated correctly?
+            - Are all new exported functions/types documented?
+
+            TESTS
+            - Does the PR include tests for the new behaviour?
+            - Are both happy-path and unhappy-path cases covered?
+            - Do the tests actually exercise the changed code (not just pass trivially)?
+            - If tests are missing or thin, flag it — TDD is required per CONTRIBUTING.md.
+
+            SECURITY
+            - Does any change touch internal/redact/? If so, verify redaction wrappers are not weakened.
+            - Does any change touch RBAC (ClusterRole, ServiceAccount)? Flag for security review.
+            - Does any change touch CRD schema or secrets handling? Flag for security review.
+            - Could any new code path expose credentials, tokens, or sensitive data in logs?
+            - Does the change align with docs/SECURITY/THREAT_MODEL.md? Read it before reviewing security-adjacent changes.
+            - Are there any hardcoded secrets, API keys, or credentials in the diff?
+
+            PROJECT ALIGNMENT
+            - Does the PR follow conventional commit format (feat:, fix:, chore:, docs:)?
+            - Does the PR body explain what the change does, why, and how it was tested?
+            - If a CRD type or Helm chart value changed, is charts/mendabot/ updated?
+            - If a CRD type changed, is testdata/crds/ regenerated?
+            - For a substantive session (>30 min of work), is a worklog entry present in docs/WORKLOGS/?
+            - Does the change break any existing public API or operator behaviour without a clear migration path?
+
+            STYLE
+            - Does the Go code follow idiomatic patterns used in the rest of the codebase?
+            - No unnecessary complexity, dead code, or commented-out blocks?
+
+            Output format — post a PR review with this structure:
+            ## Code Review
+
+            ### Summary
+            [1-3 sentence overall assessment]
+
+            ### Correctness
+            [findings or ✓ No issues]
+
+            ### Tests
+            [findings or ✓ Adequate coverage]
+
+            ### Security
+            [findings or ✓ No concerns]
+
+            ### Project Alignment
+            [findings or ✓ Aligned]
+
+            ### Style
+            [findings or ✓ No issues]
+
+            ### Verdict
+            [APPROVE / REQUEST CHANGES / COMMENT] — [one sentence reason]
+
+            Use the checked-out repository to read existing code for context before writing the review.

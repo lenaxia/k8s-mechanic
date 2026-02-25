@@ -1,0 +1,33 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "autoupdate": false,
+  "provider": {
+    "openai-compatible": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Custom OpenAI-compatible endpoint",
+      "options": {
+        "baseURL": "{env:OPENAI_API_BASE}",
+        "apiKey": "{env:OPENAI_API_KEY}"
+      },
+      "models": {
+        "default": {
+          "name": "{env:OPENAI_MODEL}",
+          "id": "{env:OPENAI_MODEL}"
+        }
+      }
+    }
+  },
+  "permission": {
+    "*": "allow",
+    "bash": {
+      "*": "deny",
+      "git*": "allow",
+      "gh*": "allow",
+      "mkdir*": "allow",
+      "cat*": "allow",
+      "ls*": "allow",
+      "pwd": "allow",
+      "jq*": "allow"
+    }
+  }
+}

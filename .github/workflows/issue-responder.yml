@@ -9,327 +9,86 @@ on:
     types: [created]
 
 jobs:
-  issue-responder:
-    # Only run for the repo owner, and gate PR-tab comments behind /ai prefix
+  # New issue opened — PROMPT is required by opencode github run for issues events
+  handle-new-issue:
     if: |
-      github.event.sender.login == 'lenaxia' &&
-      (github.event_name == 'issues' ||
-       (github.event_name == 'issue_comment' && github.event.issue.pull_request == null) ||
-       (github.event_name == 'issue_comment' && github.event.issue.pull_request != null && startsWith(github.event.comment.body, '/ai')) ||
-       (github.event_name == 'pull_request_review_comment' && startsWith(github.event.comment.body, '/ai')))
+      github.event_name == 'issues' &&
+      github.event.sender.login == 'lenaxia'
     runs-on: ubuntu-latest
     permissions:
+      id-token: write
       contents: write
       issues: write
       pull-requests: write
     steps:
-      - name: Determine checkout ref
-        id: determine-ref
-        if: github.event_name == 'issue_comment' && github.event.issue.pull_request != null
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          PR_NUMBER="${{ github.event.issue.number }}"
-          echo "Fetching PR #${PR_NUMBER} to determine checkout ref..."
-          PR_DATA=$(gh pr view "${PR_NUMBER}" --json headRefName,headRepository --repo ${{ github.repository }})
-          PR_BRANCH=$(echo "$PR_DATA" | jq -r '.headRefName')
-          REPO_NAME=$(echo "$PR_DATA" | jq -r '.headRepository.nameWithOwner')
-
-          if [[ "$REPO_NAME" == "${{ github.repository }}" ]]; then
-            echo "checkout-ref=${PR_BRANCH}" >> $GITHUB_OUTPUT
-            echo "Will checkout branch: ${PR_BRANCH}"
-          else
-            echo "checkout-ref=main" >> $GITHUB_OUTPUT
-            echo "PR from external repo, will checkout main"
-          fi
-
       - name: Checkout repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          ref: ${{ steps.determine-ref.outputs.checkout-ref || 'main' }}
-          fetch-depth: 0
+          persist-credentials: false
 
-      - name: Install OpenCode CLI
-        run: |
-          curl -fsSL https://opencode.ai/install | bash
-          echo "$HOME/.opencode/bin" >> $GITHUB_PATH
-
-      - name: Create temp directory
-        run: mkdir -p .tmp
-
-      - name: Analyze issue and take action
+      - name: Run OpenCode
+        uses: anomalyco/opencode/github@latest
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_API_BASE: ${{ secrets.OPENAI_API_BASE }}
           OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
-          IS_PR_COMMENT: ${{ github.event_name == 'pull_request_review_comment' || (github.event_name == 'issue_comment' && github.event.issue.pull_request != null) }}
-          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
-          EVENT_NAME: ${{ github.event_name }}
-          COMMENT_BODY: ${{ github.event.comment.body }}
-          CHECKOUT_REF: ${{ steps.determine-ref.outputs.checkout-ref }}
-        run: |
-          # Check if comment starts with /ai (for PR comments in conversation tab)
-          if [[ "$IS_PR_COMMENT" == "true" && "$EVENT_NAME" == "issue_comment" && ! "$COMMENT_BODY" =~ ^/ai ]]; then
-            echo "Comment does not start with /ai, skipping..."
-            exit 0
-          fi
-
-          # Determine if this is a PR comment or issue
-          if [[ "$IS_PR_COMMENT" == "true" ]]; then
-            echo "Fetching PR context..."
-            PR_INFO=$(gh pr view "$PR_NUMBER" --json title,body,number,url)
-            PR_TITLE=$(echo "$PR_INFO" | jq -r '.title')
-            PR_BODY=$(echo "$PR_INFO" | jq -r '.body')
-            PR_URL=$(echo "$PR_INFO" | jq -r '.url')
-
-            USER_PROMPT="${COMMENT_BODY#/ai }"
-            USER_PROMPT="${USER_PROMPT#/ai}"
-
-            echo "Fetching PR diff..."
-            PR_DIFF=$(gh pr diff "$PR_NUMBER" || echo "Unable to fetch diff")
-
-            {
-              echo "=== PULL REQUEST ==="
-              echo "Title: $PR_TITLE"
-              echo "Number: $PR_NUMBER"
-              echo "URL: $PR_URL"
-              echo ""
-              echo "Description:"
-              echo "$PR_BODY"
-              echo ""
-              echo "=== USER REQUEST (via /ai comment) ==="
-              echo "$USER_PROMPT"
-              echo ""
-              echo "=== PR DIFF (for context) ==="
-              echo "$PR_DIFF"
-            } > .tmp/pr-context.txt
-
-            CONVERSATION=$(cat .tmp/pr-context.txt)
-          else
-            echo "Fetching issue context..."
-            CONVERSATION=$(gh issue view "$ISSUE_NUMBER" --json body,comments --jq '["=== ORIGINAL ISSUE ===", .body, "\n=== PREVIOUS COMMENTS ==="] + [.comments[] | "[\(.createdAt)] \(.author.login):\n\(.body)\n---"] | join("\n\n")')
-          fi
-
-          cat > .tmp/issue-prompt.txt <<PROMPT_EOF
-          You are an AI assistant for the k8s-mendabot repository. Your job is to analyze GitHub issues and pull request comments from lenaxia and determine the appropriate action to take.
-
-          Context Information:
-          - Number: ${ISSUE_NUMBER}
-          - Is PR comment: ${IS_PR_COMMENT}
-          - Event type: ${EVENT_NAME}
-
-          CONVERSATION HISTORY:
-
-          ${CONVERSATION}
-
-          ===================================
-
-          If there are previous comments above, pay attention to:
-           - What you already answered
-           - Follow-up questions from lenaxia
-           - Don't repeat information - build on your previous responses
-           - Reference your previous investigation/answers when relevant
-
-          Special Instructions for Pull Request Comments:
-           - When responding to PR comments (triggered by /ai command), focus on the specific request in the comment
-           - You have access to the full PR context including title, description, and diff
-           - Use github_pull_request_review_write to add review comments if appropriate
-           - Use github_add_issue_comment to add general PR comments
-           - You can suggest code changes, review logic, or answer questions about the PR
-           - Reference specific files and line numbers from the diff when relevant
-
-          Repository Context:
-          k8s-mendabot is a Kubernetes operator written in Go (controller-runtime) that watches cluster events, uses an LLM to diagnose issues, and optionally remediates them via RemediationJob CRDs. Single maintainer: @lenaxia.
-
-          Key directories:
-          - cmd/                 - Operator entrypoints
-          - internal/            - Core operator logic (controller, agent, jobbuilder, redact wrappers)
-          - api/                 - CRD API types (RemediationJob, MendabotConfig)
-          - charts/mendabot/     - Helm chart for deploying the operator
-          - docs/                - Architecture, security docs (THREAT_MODEL, pentest findings)
-          - docker/              - Dockerfiles and smoke/wrapper test scripts
-          - .github/workflows/   - CI/CD: build, chart test, version bump, issue-responder, renovate-analysis
-
-          Common Workflows in This Repository:
-
-          1. Add a new feature to the operator
-             - Implement in internal/ (controller, agent, or jobbuilder)
-             - Add/update CRD types in api/ if schema changes
-             - Add unit/integration tests
-             - Update charts/mendabot/ values and templates if config surface changes
-             - Follow conventional commits (feat:, fix:, chore:, docs:)
-
-          2. Fix a bug
-             - Locate in internal/ or cmd/
-             - Write a failing test first (TDD per CONTRIBUTING.md)
-             - Fix and verify tests pass
-
-          3. Update Helm chart
-             - Modify charts/mendabot/templates/ or values.yaml
-             - Bump version in Chart.yaml (both version and appVersion)
-
-          4. Security changes
-             - Any change touching internal/redact/, RBAC, CRD schema, or secrets handling
-             - Requires security review checkbox per PR template
-             - See docs/SECURITY/THREAT_MODEL.md for context
-
-          5. Documentation
-             - Update docs/ or root-level governance docs (CONTRIBUTING, SECURITY, CHANGELOG, etc.)
-
-          CRITICAL RULES (READ CAREFULLY):
-          1. ALWAYS use the github_add_issue_comment tool to post a response to the original issue/PR thread before finishing
-          2. NEVER finish your analysis without calling github_add_issue_comment or github_pull_request_review_write
-          3. If ANY code/file changes are needed, you MUST create a PR using github_create_branch and github_create_pull_request - NEVER make direct commits to main
-          4. You may create new issues ONLY when explicitly requested by lenaxia
-          5. ALWAYS respond to the issue/PR where the request was made, never create a separate issue
-          6. If the issue body is very long (>10,000 characters), provide a CONCISE summary response to avoid token limits
-          7. PRIORITIZE calling github_add_issue_comment over completing a perfect analysis - a short response is better than no response
-          8. Outputting text in your response is NOT the same as posting a comment - you MUST call the github_add_issue_comment tool
-          9. NEVER handle or create secrets - if the request involves secrets, ask the user to handle separately
-          10. Follow the repo's worklog convention: any substantive change should be noted in the PR body
-
-          Your Task:
-
-          Step 1: Analyze the issue request
-
-          Read and understand what lenaxia is asking for. Determine:
-          - What does the user want to accomplish?
-          - Is this a question that needs investigation/research?
-          - Is this asking for information about the operator/config?
-          - Is this a request to implement something new?
-          - Is this a bug report or issue investigation?
-          - Is this requesting a change to existing code?
-          - Does this require exploring the codebase to understand current state?
-
-          Step 2: Determine the appropriate action
-
-          Option A: Investigation/Research (answer questions)
-          If the request is asking about the current state, configuration, or how things work:
-          - Thoroughly investigate the repository
-          - Search through relevant Go source files, CRD types, Helm templates
-          - CRITICAL: Call github_add_issue_comment with findings:
-            * Current state/configuration details
-            * Relevant file paths and line numbers
-            * Explanation of how things currently work
-            * Any recommendations or insights
-          - For PR comments, use github_pull_request_review_write to create/submit reviews
-          - Don't create a PR unless changes are explicitly requested
-
-          Option B: Implement the request (create a PR)
-          If the request requires ANY code or file changes:
-          - MANDATORY: Create a pull request - DO NOT commit directly to main branch
-          - Step 1: Call github_create_branch: feat/issue-${ISSUE_NUMBER}-<short-description>
-          - Step 2: Use github_create_or_update_file or github_push_files on the feature branch
-          - Step 3: Call github_create_pull_request with:
-            * Descriptive title (e.g., "feat(controller): add retry backoff")
-            * Body that includes "Closes #${ISSUE_NUMBER}"
-            * Description of what was changed and why
-          - Step 4: MANDATORY: Call github_add_issue_comment with PR link and summary
-
-          Option C: Ask for clarification
-          If the request is ambiguous:
-          - Call github_add_issue_comment with clarifying questions
-
-          Option D: Provide information/documentation
-          If the user wants general information:
-          - Call github_add_issue_comment with a detailed answer
-
-          Option E: Decline with explanation
-          If the request involves secrets, is out of scope, or cannot be performed:
-          - Call github_add_issue_comment explaining why and suggesting alternatives
-
-          Step 3: If implementing (Option B), follow this process:
-
-          a. Determine the implementation approach:
-             - New operator feature: look at internal/controller/ or internal/agent/ for patterns
-             - CRD change: look at api/ for existing type patterns
-             - Helm chart change: look at charts/mendabot/ for template patterns
-             - Workflow change: look at .github/workflows/ for patterns
-
-          b. Create a feature branch (MANDATORY):
-             - Call github_create_branch: feat/issue-${ISSUE_NUMBER}-<short-description>
-
-          c. Make changes on the feature branch:
-             - Use github_create_or_update_file or github_push_files
-             - Follow existing patterns and Go conventions
-
-          d. Create a pull request (MANDATORY):
-             - title: Descriptive (e.g., "feat(jobbuilder): add fingerprint dedup")
-             - body: Must include "Closes #${ISSUE_NUMBER}" plus description
-             - head: feature branch; base: "main"
-
-          e. Notify lenaxia (MANDATORY):
-             - Call github_add_issue_comment with PR link and summary
-
-          Security Guidelines:
-          - NEVER handle or create secrets
-          - Any change to internal/redact/, RBAC, or CRD schema = flag for security review
-          - Do not weaken existing redaction wrappers
-
-          CRITICAL REMINDER - MANDATORY ACTIONS BEFORE FINISHING:
-
-          1. CODE CHANGES CHECKLIST:
-             If ANY files need to be created, modified, or deleted:
-               - Call github_create_branch to create a feature branch
-               - Use github_create_or_update_file or github_push_files to make changes
-               - Call github_create_pull_request to create the PR
-               - NEVER commit directly to main branch
-
-          2. COMMENT CHECKLIST (ALWAYS REQUIRED):
-             - Call github_add_issue_comment to post your response
-             - OR call github_pull_request_review_write for PR review comments
-
-          3. CRITICAL ERRORS TO AVOID:
-             - Outputting text instead of calling github_add_issue_comment
-             - Making direct commits to main instead of creating a PR
-             - Finishing without calling github_add_issue_comment
-
-          THESE ACTIONS ARE MANDATORY. FAILURE TO COMPLETE THEM IS A CRITICAL ERROR.
-
-          Now, analyze the issue and take the appropriate action.
-          PROMPT_EOF
-
-          opencode run "$(cat .tmp/issue-prompt.txt)"
-
-          # Verify that a response was posted
-          echo "Verifying that AI posted a response..."
-
-          if [[ "$IS_PR_COMMENT" == "true" ]]; then
-            gh api "repos/${{ github.repository }}/issues/${ISSUE_NUMBER}/comments" --jq '[.[] | {id: .id, created_at: .created_at, user: .user.login}]' > .tmp/comments-after.json
-          else
-            gh api "repos/${{ github.repository }}/issues/${ISSUE_NUMBER}/comments" --jq '[.[] | {id: .id, created_at: .created_at, user: .user.login}]' > .tmp/comments-after.json
-          fi
-
-          RECENT_BOT_COMMENTS=$(jq --arg cutoff "$(date -u -d '2 minutes ago' +%Y-%m-%dT%H:%M:%SZ)" '[.[] | select(.user == "github-actions[bot]" and .created_at > $cutoff)] | length' .tmp/comments-after.json)
-
-          if [[ "$RECENT_BOT_COMMENTS" -eq 0 ]]; then
-            echo "WARNING: No response was posted by the AI. Posting a fallback message..."
-
-            FALLBACK_MESSAGE="@lenaxia I've analyzed your request but encountered an issue posting my response.
-
-          **Issue**: #${ISSUE_NUMBER}
-          **Type**: $(if [[ "$IS_PR_COMMENT" == "true" ]]; then echo "PR Comment"; else echo "Issue"; fi)
-
-          I apologize for the incomplete response. The AI agent completed its analysis but failed to post the results.
-
-          **Please try one of these:**
-          1. Re-trigger the workflow by posting a new comment
-          2. Check the workflow artifacts for any generated analysis files
-          3. Review the workflow logs at: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-
-          If this continues, please file an issue."
-
-            gh issue comment "${ISSUE_NUMBER}" --body "$FALLBACK_MESSAGE"
-          else
-            echo "Verified: AI posted a response successfully"
-          fi
-
-      - name: Upload generated artifacts
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: issue-response-${{ github.event.issue.number || github.event.pull_request.number }}
-          path: .tmp/*.md
-          retention-days: 7
+          model: openai-compatible/default
+          use_github_token: "true"
+          prompt: |
+            You are an AI assistant for the k8s-mendabot repository. Analyze this GitHub issue and take the appropriate action.
+
+            Repository: k8s-mendabot — a Kubernetes operator (Go/controller-runtime) that watches cluster events, uses an LLM to diagnose issues, and optionally remediates them via RemediationJob CRDs. Single maintainer: @lenaxia.
+
+            Key directories:
+            - cmd/               — operator entrypoints
+            - internal/          — controller, agent, jobbuilder, redact wrappers
+            - api/               — CRD types (RemediationJob, MendabotConfig)
+            - charts/mendabot/   — Helm chart
+            - docs/              — architecture, security docs (THREAT_MODEL, pentest findings)
+            - docker/            — Dockerfiles, smoke/wrapper test scripts
+            - .github/workflows/ — CI/CD pipelines
+
+            Rules:
+            1. Always post a response comment on the issue before finishing.
+            2. For code/file changes: create a feature branch and open a PR — never commit directly to main.
+            3. Feature branch naming: feat/issue-{number}-<short-description>
+            4. PR body must include "Closes #{number}" and a summary of changes.
+            5. Never handle or create secrets.
+            6. Flag any change touching internal/redact/, RBAC, CRD schema, or secrets handling as requiring security review.
+            7. If the request is ambiguous, ask for clarification in a comment.
+
+            Analyze this issue, determine what action to take, and execute it.
+
+  # Comment on an issue or PR — comment body is the user prompt, /ai prefix required
+  handle-comment:
+    if: |
+      github.event.sender.login == 'lenaxia' &&
+      (
+        (github.event_name == 'issue_comment' && (startsWith(github.event.comment.body, '/ai') || contains(github.event.comment.body, ' /ai'))) ||
+        (github.event_name == 'pull_request_review_comment' && (startsWith(github.event.comment.body, '/ai') || contains(github.event.comment.body, ' /ai')))
+      )
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: write
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Run OpenCode
+        uses: anomalyco/opencode/github@latest
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_API_BASE: ${{ secrets.OPENAI_API_BASE }}
+          OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          model: openai-compatible/default
+          use_github_token: "true"
+          mentions: /ai

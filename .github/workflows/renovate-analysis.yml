@@ -22,254 +22,120 @@ jobs:
       github.event.pull_request.user.login == 'renovate[bot]'
     runs-on: ubuntu-latest
     permissions:
+      id-token: write
       contents: write
       pull-requests: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          fetch-depth: 0
+          persist-credentials: false
 
-      - name: Install OpenCode CLI
+      # Skip analysis if the PR was already analyzed and hasn't been updated since
+      - name: Check if already analyzed
+        id: pre-check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TRIGGERING_PR: ${{ github.event.pull_request.number || inputs.pr_number || '' }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
-          curl -fsSL https://opencode.ai/install | bash
-          echo "$HOME/.opencode/bin" >> $GITHUB_PATH
+          # Only skip-check for single-PR pull_request events (not manual all-PR runs)
+          if [ "$EVENT_NAME" != "pull_request" ] || [ -z "$TRIGGERING_PR" ]; then
+            echo "skip=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
 
-      - name: Create temp directory
-        run: mkdir -p .tmp
+          echo "Checking if PR #$TRIGGERING_PR was already analyzed..."
+          PR_DATA=$(gh pr view "$TRIGGERING_PR" --json updatedAt)
+          PR_UPDATED=$(echo "$PR_DATA" | jq -r '.updatedAt')
+          echo "PR last updated: $PR_UPDATED"
 
-      - name: Analyze Renovate PRs
+          EXISTING_COMMENTS=$(gh pr view "$TRIGGERING_PR" --json comments \
+            --jq '.comments[] | select(.author.login == "github-actions" and (.body | startswith("## Renovate PR Analysis")))')
+
+          if [ -z "$EXISTING_COMMENTS" ]; then
+            echo "No existing analysis found. Proceeding."
+            echo "skip=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "Found existing analysis comment(s)"
+          COMMENT_DATE=$(echo "$EXISTING_COMMENTS" | jq -r '.createdAt' | tail -1)
+          echo "Most recent analysis: $COMMENT_DATE"
+
+          PR_UPDATED_TS=$(date -d "$PR_UPDATED" +%s 2>/dev/null || echo "0")
+          COMMENT_DATE_TS=$(date -d "$COMMENT_DATE" +%s 2>/dev/null || echo "0")
+          COMMENT_BUFFER_TS=$((COMMENT_DATE_TS + 60))
+
+          if [ "$PR_UPDATED_TS" -le "$COMMENT_BUFFER_TS" ]; then
+            echo "PR #$TRIGGERING_PR already analyzed and not updated since. Skipping."
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "PR #$TRIGGERING_PR updated after last analysis. Re-analyzing."
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Analyze with OpenCode
+        if: steps.pre-check.outputs.skip != 'true'
+        uses: anomalyco/opencode/github@latest
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_API_BASE: ${{ secrets.OPENAI_API_BASE }}
           OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TRIGGERING_PR: ${{ github.event.pull_request.number || inputs.pr_number || '' }}
-          EVENT_NAME: ${{ github.event_name }}
-        run: |
-          # Determine which PRs to analyze
-          if [ "$EVENT_NAME" = "pull_request" ]; then
-            ANALYZE_MODE="single"
-            TARGET_PR="$TRIGGERING_PR"
-            echo "Mode: Analyzing single PR #$TARGET_PR (triggered by pull_request event)"
-          elif [ -n "$TRIGGERING_PR" ]; then
-            ANALYZE_MODE="single"
-            TARGET_PR="$TRIGGERING_PR"
-            echo "Mode: Analyzing single PR #$TARGET_PR (manual workflow_dispatch)"
-          else
-            ANALYZE_MODE="all"
-            TARGET_PR=""
-            echo "Mode: Analyzing all open Renovate PRs (manual workflow_dispatch)"
-          fi
+        with:
+          model: openai-compatible/default
+          use_github_token: "true"
+          prompt: |
+            You are an AI assistant that analyzes Renovatebot pull requests for k8s-mendabot, a Kubernetes operator (Go/controller-runtime) that watches cluster events, calls an LLM to diagnose issues, and optionally remediates them via RemediationJob CRDs.
 
-          # For single PR mode, check if already analyzed
-          if [ "$ANALYZE_MODE" = "single" ] && [ -n "$TARGET_PR" ]; then
-            echo "Checking if PR #$TARGET_PR was already analyzed..."
+            Target PR (empty = find and analyze all open Renovate PRs): ${{ inputs.pr_number }}
 
-            PR_DATA=$(gh pr view "$TARGET_PR" --json updatedAt)
-            PR_UPDATED=$(echo "$PR_DATA" | jq -r '.updatedAt')
-            echo "PR Last Updated: $PR_UPDATED"
+            Task: Analyze Renovate PR(s) and post a detailed report as a PR comment. Do NOT merge any PRs.
 
-            EXISTING_COMMENTS=$(gh pr view "$TARGET_PR" --json comments --jq '.comments[] | select(.author.login == "github-actions" and (.body | startswith("## Renovate PR Analysis")))')
+            For each PR to analyze:
 
-            if [ -n "$EXISTING_COMMENTS" ]; then
-              echo "Found existing analysis comment(s)"
-              COMMENT_DATE=$(echo "$EXISTING_COMMENTS" | jq -r '.createdAt' | tail -1)
-              echo "Most recent comment date: $COMMENT_DATE"
+            1. Parse the PR title: identify the dependency, version range (old → new), update type (patch/minor/major/digest).
 
-              PR_UPDATED_TS=$(date -d "$PR_UPDATED" +%s 2>/dev/null || echo "0")
-              COMMENT_DATE_TS=$(date -d "$COMMENT_DATE" +%s 2>/dev/null || echo "0")
-              COMMENT_BUFFER_TS=$((COMMENT_DATE_TS + 60))
+            2. Identify the upstream repository:
+               - Go modules: pkg.go.dev or the module's GitHub repo
+               - GitHub Actions: the action's repository
+               - Helm chart deps: Chart.yaml repository URL
+               - Check the PR body for links
 
-              if [ "$PR_UPDATED_TS" -le "$COMMENT_BUFFER_TS" ]; then
-                echo "PR #$TARGET_PR already analyzed and no updates since last comment. Skipping."
-                exit 0
-              else
-                echo "PR #$TARGET_PR was updated after last analysis. Re-analyzing."
-              fi
-            else
-              echo "No existing analysis found. Proceeding with analysis."
-            fi
-          fi
+            3. Fetch release notes from upstream for the new version(s). For minor/major, fetch all versions between old and new.
 
-          cat > .tmp/renovate-prompt.txt <<PROMPT_EOF
-          You are an AI assistant that analyzes Renovatebot pull requests for k8s-mendabot, a Kubernetes operator written in Go (controller-runtime). The operator watches cluster events, calls an LLM to diagnose issues, and optionally remediates them via RemediationJob CRDs.
+            4. Analyze impact on this codebase:
+               - Go modules: check import usage in internal/, api/, cmd/
+               - GitHub Actions: check .github/workflows/ usage
+               - Breaking changes? Deprecated APIs we use? New required params?
 
-          Your Task:
-          Analyze Renovate PRs and provide detailed reports. DO NOT merge any PRs. Only provide analysis reports as PR comments.
+            5. Post a comment on the PR using this exact structure:
+               ## Renovate PR Analysis
+               ### Update Summary
+               - Dependency: [name]
+               - Version: [old] → [new]
+               - Type: [patch/minor/major/digest]
+               ### Release Changes
+               [new features, bug fixes, security fixes]
+               ### Breaking Changes
+               [list, or "None affecting our usage"]
+               ### Code Changes Required
+               [specific changes needed, or "None"]
+               ### Security Impact
+               [security fixes and whether they affect our threat surface]
+               ### Recommendation
+               [Safe to merge / Needs manual review / Requires code changes] — [reason]
 
-          Analysis Mode: ${ANALYZE_MODE}
-          $(if [ "$ANALYZE_MODE" = "single" ]; then echo "Target PR Number: $TARGET_PR"; fi)
+            6. Act on the recommendation:
+               - Safe to merge: merge with squash method (github_merge_pull_request)
+               - Requires code changes: create branch config/renovate-pr-{number}-changes, make changes, open a PR, comment on the Renovate PR with the link
+               - Needs manual review: post comment only, do NOT merge
 
-          Process:
+            Special exclusions (always "Needs manual review", never auto-merge):
+            - sigs.k8s.io/controller-runtime — core reconcile loop framework
+            - k8s.io/* / sigs.k8s.io/* — Kubernetes API clients
+            - Any LLM/AI SDK — affects prompt handling and response parsing
+            - github.com/bitnami/* — revoked open-source license
 
-          1. Get PRs to analyze:
-             $(if [ "$ANALYZE_MODE" = "single" ]; then
-               echo "- Only analyze PR #$TARGET_PR"
-               echo "- Verify it is authored by \"renovate[bot]\""
-               echo "- If not a Renovate PR, exit gracefully with a message"
-             else
-               echo "- List all open PRs and filter for Renovate PRs"
-               echo "- Check if author is \"renovate[bot]\""
-               echo "- For each PR, check for existing analysis comments"
-               echo "- Skip PRs that were already analyzed and haven't changed"
-             fi)
-
-          2. For each Renovate PR to analyze:
-
-             a. Parse PR title to identify:
-                - What dependency is being updated
-                - Version range (old version → new version)
-                - Update type (patch/minor/major/digest)
-
-             b. Get PR files changed
-                - Identify what Go module, GitHub Action, or Helm chart is being updated
-                - For go.mod/go.sum updates: note which module and version
-                - For GitHub Actions: note the action and version
-                - For chart dependency updates: note chart name and version
-
-             c. Identify upstream repository
-                - For Go modules: Check pkg.go.dev or the module's GitHub repo
-                - For GitHub Actions: Get the action's repository
-                - For Helm chart dependencies: Check Chart.yaml repositories
-                - Look in PR body for repository links
-
-             d. Fetch release information from upstream
-                - Get the release notes for the new version
-                - If minor/major update, get release notes between old and new versions
-                - Extract changelog, breaking changes, migration guides
-
-             e. Analyze changes
-                - What's new in this release?
-                - Any breaking changes to APIs used by this operator?
-                - Any deprecated functions or types this operator uses?
-                - New configuration options added?
-                - Security fixes included?
-
-             f. Check our usage of the dependency
-                - Look at the files changed in the PR
-                - Identify what we're currently using from this dependency
-                - For Go modules: check import usage in internal/, api/, cmd/
-                - For GitHub Actions: check workflow usage in .github/workflows/
-                - Compare with new release requirements
-
-             g. Determine what changes we need
-                - Do we need to update any Go code for API changes?
-                - Are we using deprecated functions?
-                - Do we need to add new required parameters?
-                - Are there any compatibility issues?
-
-          3. Create a detailed analysis comment on the PR with this structure:
-
-             \`\`\`markdown
-             ## Renovate PR Analysis
-
-             ### Update Summary
-             - Dependency: [name]
-             - Version: [old] → [new]
-             - Type: [patch/minor/major/digest]
-
-             ### Release Changes
-             [Summarize what's new in this release, including:]
-             - New features
-             - Bug fixes
-             - Performance improvements
-             - Security fixes
-             - Other notable changes
-
-             ### Breaking Changes
-             [List any breaking changes from the release notes]
-             [If none, state "No breaking changes detected" or "Breaking changes in this version do not affect our usage"]
-
-             ### Configuration/Code Changes Required
-             [Detailed analysis of what we need to change:]
-             - List new required parameters or API changes
-             - List deprecated functions/types we're using that need updating
-             - List any values or configs that need updating
-             - Provide example code changes if helpful
-
-             ### Security Impact
-             [Note any security fixes in this release and whether they affect our threat surface]
-
-             ### Migration Notes
-             [Any migration steps or considerations from the upstream release]
-
-             ### Recommendation
-             Based on analysis:
-             - [Safe to merge / Needs manual review / Requires code changes]
-             - Brief explanation of why
-             \`\`\`
-
-          4. Take action based on analysis:
-
-             **If "Safe to merge":**
-             - Use github_merge_pull_request to merge the PR with squash method
-             - No code changes needed in our repository
-             - Only merge if:
-               * No breaking changes affecting our usage
-               * No new required code changes
-               * Only bug fixes, minor improvements, or non-breaking features
-               * No security-sensitive changes that warrant manual review
-
-             **If "Requires code changes":**
-             - Create a new branch: config/renovate-pr-[PR_NUMBER]-changes
-             - Use github_create_branch to create the branch from main
-             - Apply the necessary code changes using github_create_or_update_file or github_push_files
-             - Create a new PR with:
-               * Title: "fix: code changes for [dependency] update"
-               * Body: Reference the Renovate PR and explain changes needed
-               * Link to original Renovate PR: "Required for #[PR_NUMBER]"
-             - Add a comment to the original Renovate PR:
-               * "Code changes required before merging"
-               * "Created PR #[NEW_PR] with the necessary updates"
-               * "Please review and merge the code PR first, then this PR can be merged"
-
-             **If "Needs manual review":**
-             - Do NOT merge
-             - Do NOT create a PR
-             - Only post the analysis comment
-             - This applies to:
-               * Breaking changes that need careful review
-               * Major version updates with significant API changes
-               * Changes to security-sensitive dependencies (controller-runtime, k8s client-go, etc.)
-               * Uncertain impact on our specific operator logic
-
-          Important Notes:
-
-          - NOTE: Duplicate detection is handled before this prompt, so you can proceed with analysis
-          - Skip PRs with "abandoned" in the title
-          - Always check if breaking changes affect our specific usage
-          - Be thorough - fetch actual release notes from upstream repositories
-          - Provide actionable, specific recommendations
-          - Use GitHub tools to fetch release information
-          - Pay extra attention to security-sensitive dependencies: controller-runtime, client-go, any LLM SDK, and redaction utilities
-
-          Special Exclusions (Always "Needs manual review" - do not auto-merge):
-          1. controller-runtime - Core operator framework; breaking changes could affect reconcile loop
-          2. client-go / k8s.io/* - Kubernetes API client; review for API deprecations
-          3. Any LLM SDK or AI client library - Changes may affect prompt handling or response parsing
-          4. github.com/bitnami/* - Avoid (revoked open source charts)
-
-          Variables:
-          - OWNER: ${{ env.OWNER }}
-          - REPO: ${{ env.REPO }}
-
-          Example Flow:
-
-          For a PR titled "Update module sigs.k8s.io/controller-runtime from v0.17.0 to v0.17.2":
-
-          1. Parse: controller-runtime, v0.17.0 → v0.17.2 (patch update)
-          2. Get files changed: go.mod, go.sum
-          3. Identify upstream: https://github.com/kubernetes-sigs/controller-runtime
-          4. Fetch release notes for v0.17.1 and v0.17.2
-          5. Analyze: Check for breaking changes to reconciler, client, or webhook interfaces
-          6. Review our usage of controller-runtime in internal/controller/
-          7. Identify: Do we need to update any reconcile loop code?
-          8. Create detailed comment on the PR with findings
-          9. If patch with no breaking changes: Use github_merge_pull_request to merge
-          10. If changes needed: Create code PR with required updates
-
-          Now proceed with the analysis based on the mode specified above.
-          PROMPT_EOF
-
-          opencode run "$(cat .tmp/renovate-prompt.txt)"
+            Skip PRs with "abandoned" in the title.

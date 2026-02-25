@@ -48,7 +48,7 @@ jobs:
           curl -fsSL "https://github.com/norwoodj/helm-docs/releases/download/${VERSION}/${ARCHIVE}" \
             -o /tmp/helm-docs.tar.gz
           # Verify checksum from official release
-          EXPECTED=$(curl -fsSL "https://github.com/norwoodj/helm-docs/releases/download/${VERSION}/helm-docs_1.14.2_checksums.txt" \
+          EXPECTED=$(curl -fsSL "https://github.com/norwoodj/helm-docs/releases/download/${VERSION}/checksums.txt" \
             | grep "${ARCHIVE}" | awk '{print $1}')
           ACTUAL=$(sha256sum /tmp/helm-docs.tar.gz | awk '{print $1}')
           if [ "$EXPECTED" != "$ACTUAL" ]; then

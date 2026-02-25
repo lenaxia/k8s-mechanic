@@ -26,6 +26,7 @@ var testRJob = &v1alpha1.RemediationJob{
 		GitOpsManifestRoot: "kubernetes/",
 		SinkType:           "github",
 		Fingerprint:        "abcdef012345abcdef012345abcdef012345abcdef012345abcdef012345abcd",
+		Severity:           "high",
 		Finding: v1alpha1.FindingSpec{
 			Kind:         "Deployment",
 			Name:         "my-app",
@@ -172,6 +173,9 @@ func TestBuild_EnvVars_AllPresent(t *testing.T) {
 		if _, ok := getEnv(main, name); !ok {
 			t.Errorf("env var %q missing from main container", name)
 		}
+	}
+	if val, ok := getEnv(main, "FINDING_SEVERITY"); !ok || val != "high" {
+		t.Errorf("FINDING_SEVERITY = %q (ok=%v), want %q", val, ok, "high")
 	}
 }
 

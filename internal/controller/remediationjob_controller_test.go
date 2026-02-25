@@ -21,6 +21,7 @@ import (
 	v1alpha1 "github.com/lenaxia/k8s-mendabot/api/v1alpha1"
 	"github.com/lenaxia/k8s-mendabot/internal/config"
 	"github.com/lenaxia/k8s-mendabot/internal/controller"
+	"github.com/lenaxia/k8s-mendabot/internal/jobbuilder"
 	"github.com/lenaxia/k8s-mendabot/internal/testutil"
 	"go.uber.org/zap"
 )
@@ -971,6 +972,61 @@ func TestReconcile_NilRecorder_NoPanic(t *testing.T) {
 	}
 	if len(jobList.Items) != 1 {
 		t.Errorf("expected 1 job created, got %d", len(jobList.Items))
+	}
+}
+
+// TestRemediationJobReconciler_SeverityPassedToJobBuilder verifies the full Severity chain:
+// RemediationJob.Spec.Severity="critical" → controller passes rjob to JobBuilder.Build()
+// with Severity intact → real jobbuilder sets FINDING_SEVERITY="critical" in the Job env.
+func TestRemediationJobReconciler_SeverityPassedToJobBuilder(t *testing.T) {
+	const fp = "abcdefghijklmnopqrstuvwxyz012345abcdefghijklmnopqrstuvwxyz012345"
+	rjob := newRJob("test-severity-chain", fp)
+	rjob.Status.Phase = v1alpha1.PhasePending
+	rjob.Spec.Severity = "critical"
+
+	job := defaultFakeJob(rjob)
+	jb := &fakeJobBuilder{returnJob: job}
+
+	c := newFakeClient(t, rjob)
+	r := newReconciler(t, c, jb, defaultCfg())
+
+	_, err := r.Reconcile(context.Background(), rjobReqFor("test-severity-chain"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(jb.calls) != 1 {
+		t.Fatalf("expected exactly 1 Build() call, got %d", len(jb.calls))
+	}
+	if jb.calls[0].RemediationJob.Spec.Severity != "critical" {
+		t.Errorf("Build() received Severity=%q, want %q",
+			jb.calls[0].RemediationJob.Spec.Severity, "critical")
+	}
+
+	// Close the loop: build via the real jobbuilder using the same rjob that was
+	// passed to the fake and assert FINDING_SEVERITY is propagated into the env var.
+	realBuilder, err := jobbuilder.New(jobbuilder.Config{
+		AgentNamespace: testNamespace,
+	})
+	if err != nil {
+		t.Fatalf("jobbuilder.New: %v", err)
+	}
+	realJob, err := realBuilder.Build(jb.calls[0].RemediationJob, nil)
+	if err != nil {
+		t.Fatalf("real Build(): %v", err)
+	}
+	var containers []corev1.Container
+	containers = append(containers, realJob.Spec.Template.Spec.Containers...)
+	var findingSeverity string
+	for _, c := range containers {
+		for _, env := range c.Env {
+			if env.Name == "FINDING_SEVERITY" {
+				findingSeverity = env.Value
+			}
+		}
+	}
+	if findingSeverity != "critical" {
+		t.Errorf("FINDING_SEVERITY env var = %q, want %q", findingSeverity, "critical")
 	}
 }
 

@@ -112,6 +112,7 @@ func (n *nodeProvider) ExtractFinding(obj client.Object) (*domain.Finding, error
 
 // computeNodeSeverity returns the highest severity across all firing node conditions.
 func computeNodeSeverity(node *corev1.Node) domain.Severity {
+	// All non-Ready conditions are high by design; only NodeReady=False/Unknown escalates to critical.
 	current := domain.SeverityHigh
 
 	for _, cond := range node.Status.Conditions {

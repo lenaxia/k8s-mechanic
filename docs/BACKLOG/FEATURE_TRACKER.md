@@ -53,7 +53,7 @@ a feature is approved for implementation:
 | FT-A6 | Multi-signal correlation (related findings) | ★★★ | ●●● | Deferred (epic13) |
 | FT-A7 | GitOps drift detection source provider | ★★★ | ●● | Evaluated |
 | FT-A8 | False-positive feedback annotation | ★★★ | ●● | Evaluated |
-| FT-A9 | Mandatory pre-PR manifest validation | ★★★ | ● | Planned (epic18) |
+| FT-A9 | Mandatory pre-PR manifest validation | ★★★ | ● | Complete (epic18) |
 | FT-A10 | Blast radius estimation before PR | ★★ | ●● | Evaluated |
 
 ---
@@ -286,29 +286,13 @@ can be removed to re-enable future investigations.
 
 ### FT-A9 — Mandatory pre-PR manifest validation
 
-**Problem:** The agent prompt already instructs `kubeconform` validation in STEP 8 as
-a recommended step. But it is not in the HARD RULES section, so the agent may skip it
-when it is confident about a change, or if `kubeconform` is not available for the schema
-in question.
+**Status: Complete (epic18, 2026-02-25)**
 
-**Proposed solution:** Promote manifest validation to a HARD RULE:
-
-```
-HARD RULE 8 — MANDATORY VALIDATION:
-Before any `git commit`, run kubeconform on ALL modified files. If kubeconform exits
-non-zero for any file, you MUST NOT commit or push. Instead:
-- Open the PR with no code changes
-- Include the kubeconform error output in the PR body under ## Validation Errors
-- Add the label "validation-failed"
-This rule has no exceptions. A PR with validation-failed is better than a PR with
-invalid YAML that breaks the cluster.
-```
-
-Also add `kustomize build <overlay> | kubeconform` for Kustomize overlays, and
-`helm template <release> <chart> | kubeconform` for Helm values changes.
-
-This is a prompt-only change with zero Go code. The value is high because schema-invalid
-YAML that passes `git push` and fails in Flux is a real and damaging failure mode.
+HARD RULE 10 added to `charts/mendabot/files/prompts/core.txt`. Validation is mandatory
+before any `git commit`, covering three cases: plain YAML (Case A), Kustomize overlays
+(Case B), and Helm values (Case C). Fallback when kubeconform exits non-zero: empty-commit
+placeholder PR with `## Validation Errors` section, labels `validation-failed` +
+`needs-human-review`. STEP 7 updated to mandatory with cross-reference to HARD RULE 10.
 
 ---
 
@@ -1152,7 +1136,7 @@ product, the recommended implementation sequence (after epic09 is complete):
 | Priority | Feature ID | Rationale |
 |---|---|---|
 | 1 | FT-A1 | Namespace filtering eliminates the largest source of noise immediately |
-| 2 | FT-A9 | Mandatory validation prevents schema-invalid PRs — the most visible failure mode |
+| 2 | FT-A9 | Mandatory validation prevents schema-invalid PRs — **Complete (epic18)** |
 | 3 | FT-R7 | Self-remediation cascade prevention stops infinite mendabot failure loops |
 | 4 | FT-R1 | Dead-letter queue prevents infinite retry loops that burn LLM quota |
 | 5 | FT-A2 | Annotation opt-out gives operators per-resource escape hatches |

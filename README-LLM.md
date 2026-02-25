@@ -875,6 +875,7 @@ kubectl apply -k deploy/kustomize/
 | `feature/epic24-severity-tiers` | Epic 24: Severity tiers on findings (Severity type, provider classification, MIN_SEVERITY filter, prompt calibration) | 2026-02-25 | a4d719c |
 | `feature/epic11-self-remediation-cascade` | Epic 11 self-remediation cascade prevention (depth limit + circuit breaker) | 2026-02-25 | e7d731f |
 | `feature/epic25-tool-output-redaction` | Epic 25 tool call output redaction (wrappers + cmd/redact) | 2026-02-25 | 6df2e76 |
+| `feature/epic18-manifest-validation` | Epic 18 mandatory manifest validation — HARD RULE 10, STEP 7 mandatory | 2026-02-25 | 0684762 |
 
 **Branch naming:**
 - Feature: `feature/short-description`

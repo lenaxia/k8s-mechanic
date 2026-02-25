@@ -44,6 +44,42 @@ Both gaps have LOW exploitability via pod error messages in practice. PEM keys i
 
 **New findings:** 2026-02-24-P-006 (LOW — PEM header leaks key type), 2026-02-24-P-007 (LOW — X-API-Key header format not covered)
 
+### Remediation (applied 2026-02-24, commit cd7d53b)
+
+Both gaps were fixed in `internal/domain/redact.go`:
+
+**P-006 — PEM private key block pattern added:**
+```go
+{regexp.MustCompile(`(?is)-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----.*?-----END (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----`), `[REDACTED-PEM-KEY]`},
+```
+Covers RSA, EC, DSA, OPENSSH, and PKCS8 (`PRIVATE KEY`) formats. Public key headers excluded by omission. `(?s)` dot-all mode required for multi-line blocks.
+
+**P-007 — X-API-Key HTTP header pattern added:**
+```go
+{regexp.MustCompile(`(?i)(x-api-key\s*[=:]\t*)\S+`), `${1}[REDACTED]`},
+```
+Covers `X-API-Key: value` regardless of value length. Complements the existing `api[_-]?key` pattern which required assignment syntax.
+
+**Post-fix gap table (verified):**
+
+| Input | Output after fix | Passes Through? |
+|-------|-----------------|----------------|
+| `-----BEGIN RSA PRIVATE KEY-----\nMIIEow...\n-----END RSA PRIVATE KEY-----` | `[REDACTED-PEM-KEY]` | No |
+| `-----BEGIN PRIVATE KEY-----\nMIIEvQ==\n-----END PRIVATE KEY-----` | `[REDACTED-PEM-KEY]` | No |
+| `X-API-Key: 12345abcde` | `X-API-Key: [REDACTED]` | No |
+| `x-api-key: myshortkey` | `x-api-key: [REDACTED]` | No |
+
+New test cases added in `internal/domain/redact_test.go`:
+- `P-006: PEM RSA private key full block`
+- `P-006: PEM EC private key full block`
+- `P-006: PEM PRIVATE KEY (PKCS8) full block`
+- `P-006: PEM public key not redacted`
+- `P-007: X-API-Key header`
+- `P-007: x-api-key header lowercase`
+- `P-007: X-API-Key with tabs`
+
+Post-fix test run: `go test -timeout 30s -race ./internal/domain/` — **PASS** (29 subtests).
+
 ---
 
 ## 3.2 Injection Detection Coverage

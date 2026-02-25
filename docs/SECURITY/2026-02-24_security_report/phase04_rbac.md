@@ -1,118 +1,112 @@
 # Phase 4: RBAC Enforcement Testing
 
-**Date run:**
-**Reviewer:**
-**Cluster:** yes / no — if no, mark all tests SKIPPED
+**Date run:** 2026-02-24
+**Cluster:** yes (v0.3.9, default namespace)
+
+All tests run against the live deployed ServiceAccounts.
 
 ---
 
 ## 4.1 Default Cluster Scope — Secret Read
 
-**Status:** Executed / SKIPPED — reason: ______
+**Status:** Executed
 
-```bash
-kubectl auth can-i get secret/rbac-test-secret -n default \
-  --as=system:serviceaccount:mendabot:mendabot-agent
 ```
-```
-<!-- paste output -->
-```
+kubectl auth can-i get secret -n kube-system --as=system:serviceaccount:default:mendabot-agent
+→ yes
 
-```bash
-kubectl get secret rbac-test-secret -n default \
-  --as=system:serviceaccount:mendabot:mendabot-agent -o yaml
-```
-```
-<!-- paste output -->
+kubectl get secret -n kube-system --as=system:serviceaccount:default:mendabot-agent
+→ NAME ... bootstrap-token-m1akoo ... sh.helm.release.v1.cilium.v22 ... (SUCCESS)
 ```
 
 | Check | Expected | Actual | Pass? |
 |-------|----------|--------|-------|
-| Agent can read Secret (cluster scope) | yes | | |
-
-**Note:** This result is EXPECTED to be "yes" — it is accepted residual risk AR-01.
-Record it as a confirmed accepted risk, not a defect.
+| Agent can read Secret cluster-wide | yes (AR-01) | yes | PASS (confirmed accepted risk) |
 
 ---
 
 ## 4.2 Namespace Scope — Secret Read Restriction
 
-**Status:** Executed / SKIPPED — reason: ______
+**Status:** SKIPPED — `mendabot-agent-ns` ServiceAccount not deployed (default scope deployment)
 
-```bash
-# Out-of-scope namespace — should be forbidden
-kubectl auth can-i get secret -n production \
-  --as=system:serviceaccount:mendabot:mendabot-agent-ns
-```
-```
-<!-- paste output -->
-```
-
-```bash
-# In-scope namespace — should be allowed
-kubectl auth can-i get secret -n default \
-  --as=system:serviceaccount:mendabot:mendabot-agent-ns
-```
-```
-<!-- paste output -->
-```
-
-| Check | Expected | Actual | Pass? |
-|-------|----------|--------|-------|
-| Secret read blocked in out-of-scope namespace | no | | |
-| Secret read allowed in in-scope namespace | yes | | |
+The `role-agent-ns.yaml` and `rolebinding-agent-ns.yaml` templates exist in the chart for namespace scope but are only deployed when `watcher.agentRBACScope=namespace`. Current deployment uses default cluster scope.
 
 ---
 
 ## 4.3 Agent Write Restriction
 
-**Status:** Executed / SKIPPED — reason: ______
-
-```bash
-kubectl auth can-i create pod -n default \
-  --as=system:serviceaccount:mendabot:mendabot-agent
-kubectl auth can-i create deployment -n default \
-  --as=system:serviceaccount:mendabot:mendabot-agent
-kubectl auth can-i create pods/exec -n default \
-  --as=system:serviceaccount:mendabot:mendabot-agent
-kubectl auth can-i get nodes/proxy \
-  --as=system:serviceaccount:mendabot:mendabot-agent
-```
-```
-<!-- paste output -->
-```
+**Status:** Executed
 
 | Check | Expected | Actual | Pass? |
 |-------|----------|--------|-------|
-| Cannot create pods | no | | |
-| Cannot create deployments | no | | |
-| Cannot exec into pods | no | | |
-| Cannot access nodes/proxy | no | | |
+| Cannot create pods | no | no | PASS |
+| Cannot create deployments | no | no | PASS |
+| Cannot exec into pods (pods/exec create) | no | no | PASS |
+| Cannot access nodes/proxy (get) | no | **yes** | **FAIL** — see finding P-004 |
+| Cannot delete remediationjobs | no | no | PASS |
+| Cannot update remediationjob spec | no | no | PASS |
+| Cannot create remediationjobs | no | no | PASS |
+| Cannot create batch/jobs | no | no | PASS |
+
+**nodes/proxy escalation confirmed:**
+
+```
+kubectl get --raw "/api/v1/nodes/cp-00/proxy/metrics" --as=...mendabot-agent
+→ # HELP aggregator_discovery_aggregation_count_total [ALPHA] ... (SUCCESS)
+
+kubectl get --raw "/api/v1/nodes/cp-00/proxy/logs/" --as=...mendabot-agent
+→ <listing: alternatives.log, containers/, etc.> (SUCCESS)
+```
+
+The agent can read node-level metrics and kubelet-exposed log listings via the API server proxy. The wildcard `resources: ["*"]` in the agent ClusterRole implicitly includes `nodes/proxy`.
 
 ---
 
 ## 4.4 Watcher Escalation Paths
 
-**Status:** Executed / SKIPPED — reason: ______
-
-```bash
-kubectl auth can-i get secret -n default \
-  --as=system:serviceaccount:mendabot:mendabot-watcher
-kubectl auth can-i delete remediationjob -n kube-system \
-  --as=system:serviceaccount:mendabot:mendabot-watcher
-```
-```
-<!-- paste output -->
-```
+**Status:** Executed
 
 | Check | Expected | Actual | Pass? |
 |-------|----------|--------|-------|
-| Watcher cannot read Secrets | no | | |
-| Watcher cannot delete RemediationJobs outside mendabot ns | no | | |
+| Watcher cannot read Secrets | no | **yes** | **FAIL** — see finding P-005 |
+| Watcher cannot create pods | no | no | PASS |
+| Watcher cannot delete RemediationJobs in kube-system | no | yes | INFO (RemediationJob CRD does not exist in kube-system; delete would be a no-op in practice but permission exists) |
+| Watcher cannot write ConfigMaps cluster-wide | no | no | PASS |
+| Watcher cannot write ConfigMaps in own namespace | no | no | PASS (no configmap write in any ClusterRole or Role) |
+
+```
+kubectl get secret -n kube-system --as=...mendabot-watcher
+→ NAME ... bootstrap-token-m1akoo ... (SUCCESS)
+```
+
+**Root cause:** The live deployed `mendabot-watcher` ClusterRole includes `"secrets"` in the resource list. The Helm chart source (`charts/mendabot/templates/clusterrole-watcher.yaml`) was remediated in the 2026-02-24 security review (finding 2026-02-24-002), but the cluster was never re-deployed with the fixed chart. The live RBAC state is the **pre-fix version**.
+
+---
+
+## 4.5 Agent Status Patch Verification
+
+**Status:** Executed
+
+`kubectl auth can-i patch remediationjobs/status -n default --as=...mendabot-agent` returns `no` — this is a known false negative with custom resource subresources in `kubectl auth can-i`. Actual impersonation test:
+
+```
+kubectl patch remediationjob mendabot-0cd2345e0966 -n default \
+  --type=merge --subresource=status --patch='{"status":{"phase":"Running"}}' \
+  --as=system:serviceaccount:default:mendabot-agent
+→ remediationjob.remediation.mendabot.io/mendabot-0cd2345e0966 patched  (SUCCESS)
+
+kubectl patch remediationjob mendabot-0cd2345e0966 -n default \
+  --type=merge --patch='{"spec":{"maxRetries":99}}' \
+  --as=system:serviceaccount:default:mendabot-agent
+→ Forbidden  (PASS — spec write blocked)
+```
+
+**Result:** RBAC isolation of `remediationjobs/status` vs full spec is correctly enforced.
 
 ---
 
 ## Phase 4 Summary
 
-**Total findings:** 0
-**Findings added to findings.md:** (list IDs)
+**Total new findings:** 2 (P-004, P-005) — already documented in Phase 2
+**Carry-over confirmed:** AR-01 (accepted)
+**Notes:** P-004 (nodes/proxy) and P-005 (watcher secrets) are the two active HIGH findings requiring remediation.

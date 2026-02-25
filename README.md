@@ -150,21 +150,124 @@ kubectl create secret generic github-app \
   --from-literal=app-id=<your-app-id> \
   --from-literal=installation-id=<your-installation-id> \
   --from-file=private-key=<path-to-private-key.pem>
+```
 
-# For native OpenAI (api.openai.com):
+The `llm-credentials-opencode` secret holds the full
+[OpenCode config](https://opencode.ai/docs) as its `provider-config` key.
+The correct schema has `model` as a **top-level** key (format: `"<provider-id>/<model-id>"`);
+`options` belongs **inside** `provider.<name>`, not at the root.
+
+**Native OpenAI (`api.openai.com`)**
+
+```sh
+cat > /tmp/opencode-config.json << 'EOF'
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "openai": {
+      "apiKey": "sk-<your-openai-api-key>"
+    }
+  },
+  "model": "openai/gpt-4o"
+}
+EOF
+
 kubectl create secret generic llm-credentials-opencode \
   --namespace mendabot \
-  --from-literal=provider-config='{"model":"openai/gpt-4o"}'
-# The secret above tells OpenCode which model to use. You must also supply the API key
-# via the OPENAI_API_KEY environment variable or by running: opencode auth add openai
-# A common approach is to add the key to the secret and inject it via a Helm value
-# or a separate Secret; see Configuration below.
-
-# For a custom OpenAI-compatible endpoint (self-hosted, Ollama, Azure, etc.):
-# kubectl create secret generic llm-credentials-opencode \
-#   --namespace mendabot \
-#   --from-literal=provider-config='{"provider":{"myprovider":{"npm":"@ai-sdk/openai-compatible","name":"My Provider","options":{"baseURL":"<url>","apiKey":"<key>"},"models":{"<model-id>":{"name":"<model-name>"}}}},"model":"myprovider/<model-id>"}'
+  --from-file=provider-config=/tmp/opencode-config.json
 ```
+
+Or as a manifest:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: llm-credentials-opencode
+  namespace: mendabot
+stringData:
+  provider-config: |
+    {
+      "$schema": "https://opencode.ai/config.json",
+      "provider": {
+        "openai": {
+          "apiKey": "sk-<your-openai-api-key>"
+        }
+      },
+      "model": "openai/gpt-4o"
+    }
+```
+
+**Custom OpenAI-compatible endpoint (self-hosted, Ollama, Azure, etc.)**
+
+For any endpoint that is not `api.openai.com`, or that uses a model name not
+registered in the built-in OpenAI provider, you must define a custom provider
+with `"npm": "@ai-sdk/openai-compatible"`. You cannot reuse the built-in
+`openai` provider for a different base URL.
+
+```sh
+cat > /tmp/opencode-config.json << 'EOF'
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "myprovider": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "My Provider",
+      "options": {
+        "baseURL": "https://my-llm-endpoint/v1",
+        "apiKey": "sk-<your-api-key>"
+      },
+      "models": {
+        "my-model-id": {
+          "name": "My Model Name"
+        }
+      }
+    }
+  },
+  "model": "myprovider/my-model-id"
+}
+EOF
+
+kubectl create secret generic llm-credentials-opencode \
+  --namespace mendabot \
+  --from-file=provider-config=/tmp/opencode-config.json
+```
+
+Or as a manifest:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: llm-credentials-opencode
+  namespace: mendabot
+stringData:
+  provider-config: |
+    {
+      "$schema": "https://opencode.ai/config.json",
+      "provider": {
+        "myprovider": {
+          "npm": "@ai-sdk/openai-compatible",
+          "name": "My Provider",
+          "options": {
+            "baseURL": "https://my-llm-endpoint/v1",
+            "apiKey": "sk-<your-api-key>"
+          },
+          "models": {
+            "my-model-id": {
+              "name": "My Model Name"
+            }
+          }
+        }
+      },
+      "model": "myprovider/my-model-id"
+    }
+```
+
+> **Note:** The agent also accepts the config via the `OPENCODE_CONFIG_CONTENT`
+> environment variable (the full JSON string). This is the highest-precedence
+> config layer and overrides the secret. All standard OpenCode schema keys are
+> valid (`model`, `provider`, `$schema`, etc.).
 
 ### 2. Install with Helm
 

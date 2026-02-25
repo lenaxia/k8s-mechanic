@@ -75,6 +75,7 @@ spec:
                   parentObject: {type: string}
                   errors: {type: string}
                   details: {type: string}
+                  chainDepth: {type: integer}
               gitOpsRepo: {type: string}
               gitOpsManifestRoot: {type: string}
               agentImage: {type: string}

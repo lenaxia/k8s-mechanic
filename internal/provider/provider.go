@@ -407,6 +407,7 @@ func (r *SourceProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 				ParentObject: finding.ParentObject,
 				Errors:       finding.Errors,
 				Details:      finding.Details,
+				ChainDepth:   int32(finding.ChainDepth),
 			},
 			GitOpsRepo:         r.Cfg.GitOpsRepo,
 			GitOpsManifestRoot: r.Cfg.GitOpsManifestRoot,

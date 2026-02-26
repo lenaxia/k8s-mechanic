@@ -82,6 +82,10 @@
         "maxInvestigationRetries": {
           "type": "string",
           "description": "Maximum investigation retries per RemediationJob before permanently failing."
+        },
+        "dryRun": {
+          "type": "boolean",
+          "description": "Enable dry-run shadow mode. Blocks write operations; stores investigation reports in RemediationJob.status.message."
         }
       }
     },

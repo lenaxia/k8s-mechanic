@@ -85,6 +85,10 @@ done
 check_exec /usr/local/bin/gh
 check_exec /usr/bin/gh
 
+# git: wrapper at /usr/local/bin/git, real binary at /usr/bin/git.real (apt-installed, renamed by Dockerfile)
+check_exec /usr/local/bin/git
+check_exec /usr/bin/git.real
+
 # ── Wrapper structure checks (structural, not functional) ─────────────────────
 for tool in kubectl helm flux gh sops talosctl yq stern kubeconform kustomize age age-keygen; do
     printf 'Checking wrapper structure: %s ... ' "$tool"
@@ -106,6 +110,15 @@ printf 'Checking gh wrapper calls /usr/bin/gh ... '
 if docker run --rm --entrypoint /bin/sh "$IMAGE" -c \
     "grep -qF '/usr/bin/gh' /usr/local/bin/gh && \
      ! grep -qF 'gh.real' /usr/local/bin/gh"; then
+    echo "OK"; ((pass++)) || true
+else
+    echo "FAIL"; ((fail++)) || true
+fi
+
+# git wrapper: verify it contains the DRY_RUN blocking pattern
+printf 'Checking git wrapper has DRY_RUN blocking pattern ... '
+if docker run --rm --entrypoint /bin/sh "$IMAGE" -c \
+    "grep -qF 'DRY_RUN' /usr/local/bin/git"; then
     echo "OK"; ((pass++)) || true
 else
     echo "FAIL"; ((fail++)) || true

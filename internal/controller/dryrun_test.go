@@ -475,10 +475,17 @@ func TestReconcile_DryRunSucceeded_LogStreamError(t *testing.T) {
 // TestReconcile_DryRunSucceeded_MessageAlreadySet verifies that when
 // rjob.Status.Message is already set, the reconciler does not call
 // fetchDryRunReport again — confirming the idempotency guard at controller.go:178.
+//
+// The rjob starts in PhaseDispatched with Message pre-populated so the
+// reconciler enters the owned-jobs loop (not the PhaseSucceeded short-circuit).
+// The owned Job has Succeeded=1, so syncPhaseFromJob returns PhaseSucceeded.
+// The guard fires: newPhase==PhaseSucceeded && dry-run annotation present &&
+// rjob.Status.Message != "" → fetchDryRunReport is NOT called → Message stays
+// as "existing report". Phase is updated to PhaseSucceeded.
 func TestReconcile_DryRunSucceeded_MessageAlreadySet(t *testing.T) {
 	const fp = "abcdefghijklmnopqrstuvwxyz012345abcdefghijklmnopqrstuvwxyz012345"
 	rjob, job := newDryRunRJobWithJob(
-		"test-dryrun-alreadyset", fp, v1alpha1.PhaseSucceeded,
+		"test-dryrun-alreadyset", fp, v1alpha1.PhaseDispatched,
 		map[string]string{"mendabot.io/dry-run": "true"},
 	)
 	rjob.Status.Message = "existing report"
@@ -517,6 +524,9 @@ func TestReconcile_DryRunSucceeded_MessageAlreadySet(t *testing.T) {
 	}
 	if updated.Status.Message != "existing report" {
 		t.Errorf("Message = %q, want \"existing report\" — idempotency guard must prevent overwrite", updated.Status.Message)
+	}
+	if updated.Status.Phase != v1alpha1.PhaseSucceeded {
+		t.Errorf("Phase = %q, want %q — reconcile must progress phase from Dispatched to Succeeded", updated.Status.Phase, v1alpha1.PhaseSucceeded)
 	}
 }
 

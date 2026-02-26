@@ -426,6 +426,100 @@ func TestReconcile_NoDryRun_MessageNotPopulated(t *testing.T) {
 	}
 }
 
+// TestReconcile_DryRunSucceeded_LogStreamError verifies that when Stream()
+// returns an error, Message starts with "dry-run report unavailable" and the
+// reconciler does not panic.
+func TestReconcile_DryRunSucceeded_LogStreamError(t *testing.T) {
+	const fp = "abcdefghijklmnopqrstuvwxyz012345abcdefghijklmnopqrstuvwxyz012345"
+	rjob, job := newDryRunRJobWithJob(
+		"test-dryrun-streamerr", fp, v1alpha1.PhaseDispatched,
+		map[string]string{"mendabot.io/dry-run": "true"},
+	)
+
+	pod := newSucceededPod("test-pod-streamerr", testNamespace, job.Name)
+
+	s := newTestScheme(t)
+	c := fake.NewClientBuilder().
+		WithScheme(s).
+		WithStatusSubresource(&v1alpha1.RemediationJob{}).
+		WithObjects(rjob, job, pod).
+		Build()
+
+	streamErr := fmt.Errorf("connection refused")
+	kubeClient := newFakeLogKubeClient("", streamErr)
+
+	r := &controller.RemediationJobReconciler{
+		Client:     c,
+		Scheme:     s,
+		JobBuilder: &fakeJobBuilder{},
+		Cfg:        defaultCfg(),
+		KubeClient: kubeClient,
+	}
+
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "test-dryrun-streamerr", Namespace: testNamespace},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var updated v1alpha1.RemediationJob
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "test-dryrun-streamerr", Namespace: testNamespace}, &updated); err != nil {
+		t.Fatalf("get rjob: %v", err)
+	}
+	if !strings.HasPrefix(updated.Status.Message, "dry-run report unavailable") {
+		t.Errorf("Message = %q, want prefix \"dry-run report unavailable\"", updated.Status.Message)
+	}
+}
+
+// TestReconcile_DryRunSucceeded_MessageAlreadySet verifies that when
+// rjob.Status.Message is already set, the reconciler does not call
+// fetchDryRunReport again — confirming the idempotency guard at controller.go:178.
+func TestReconcile_DryRunSucceeded_MessageAlreadySet(t *testing.T) {
+	const fp = "abcdefghijklmnopqrstuvwxyz012345abcdefghijklmnopqrstuvwxyz012345"
+	rjob, job := newDryRunRJobWithJob(
+		"test-dryrun-alreadyset", fp, v1alpha1.PhaseSucceeded,
+		map[string]string{"mendabot.io/dry-run": "true"},
+	)
+	rjob.Status.Message = "existing report"
+
+	pod := newSucceededPod("test-pod-alreadyset", testNamespace, job.Name)
+
+	s := newTestScheme(t)
+	c := fake.NewClientBuilder().
+		WithScheme(s).
+		WithStatusSubresource(&v1alpha1.RemediationJob{}).
+		WithObjects(rjob, job, pod).
+		Build()
+
+	// If fetchDryRunReport were called, it would return content containing "NEW CONTENT".
+	// The assertion below proves the guard fired and fetchDryRunReport was NOT invoked.
+	kubeClient := newFakeLogKubeClient(dryRunSentinel+"\nNEW CONTENT", nil)
+
+	r := &controller.RemediationJobReconciler{
+		Client:     c,
+		Scheme:     s,
+		JobBuilder: &fakeJobBuilder{},
+		Cfg:        defaultCfg(),
+		KubeClient: kubeClient,
+	}
+
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "test-dryrun-alreadyset", Namespace: testNamespace},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var updated v1alpha1.RemediationJob
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "test-dryrun-alreadyset", Namespace: testNamespace}, &updated); err != nil {
+		t.Fatalf("get rjob: %v", err)
+	}
+	if updated.Status.Message != "existing report" {
+		t.Errorf("Message = %q, want \"existing report\" — idempotency guard must prevent overwrite", updated.Status.Message)
+	}
+}
+
 // Verify our fake implements the interface (compile-time check).
 var _ interface {
 	CoreV1() corev1client.CoreV1Interface

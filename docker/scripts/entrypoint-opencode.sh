@@ -23,7 +23,7 @@ export OPENCODE_CONFIG_CONTENT="$AGENT_PROVIDER_CONFIG"
 # emit_dry_run_report after opencode exits. In normal mode, exec replaces the
 # shell (no overhead; correct exit code forwarding).
 if [ "${DRY_RUN:-false}" = "true" ]; then
-    opencode run "$(cat /tmp/rendered-prompt.txt)"
+    opencode run "$(cat /tmp/rendered-prompt.txt)" || true
     emit_dry_run_report
 else
     exec opencode run "$(cat /tmp/rendered-prompt.txt)"

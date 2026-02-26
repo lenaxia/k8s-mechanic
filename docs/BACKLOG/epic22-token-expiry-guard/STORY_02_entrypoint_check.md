@@ -1,7 +1,7 @@
 # Story 02: entrypoint-common.sh — Pre-flight Expiry Check
 
 **Epic:** epic22-token-expiry-guard (FT-R3)
-**Status:** Not Started
+**Status:** Complete
 **Depends on:** STORY_01_token_expiry_file.md
 
 ---
@@ -243,14 +243,14 @@ No Dockerfile changes are needed.
 
 ## Acceptance criteria
 
-- [ ] When `/workspace/github-token-expiry` is absent, the script prints a `WARNING` to
+- [x] When `/workspace/github-token-expiry` is absent, the script prints a `WARNING` to
       stderr and continues normally — the `gh auth status` check still runs.
-- [ ] When `NOW >= EXPIRY - 60`, the script prints an error message containing both
+- [x] When `NOW >= EXPIRY - 60`, the script prints an error message containing both
       `EXPIRY=<value>` and `NOW=<value>` to stderr and exits with code 1.
-- [ ] When `NOW < EXPIRY - 60`, the script proceeds to `gh auth login` and beyond
+- [x] When `NOW < EXPIRY - 60`, the script proceeds to `gh auth login` and beyond
       unchanged.
-- [ ] `exit 1` causes the `batch/v1 Job` to enter `Failed` state (verified by checking
+- [x] `exit 1` causes the `batch/v1 Job` to enter `Failed` state (verified by checking
       job status after the container exits).
-- [ ] No LLM API calls are made when the guard fires (the `exec opencode run` line in
+- [x] No LLM API calls are made when the guard fires (the `exec opencode run` line in
       `entrypoint-opencode.sh` is never reached because `entrypoint-common.sh` exits
       before returning to the caller).

@@ -72,6 +72,25 @@ kubectl config use-context in-cluster \
 
 export KUBECONFIG=/home/agent/.kube/config
 
+# Pre-flight: check that the GitHub App token has not expired (or is not about
+# to expire within the next 60 seconds).  The expiry file is written by the init
+# container via get-github-app-token.sh.  If the file is absent (e.g. an older
+# init container image that pre-dates STORY_01), emit a warning and continue —
+# the existing gh auth status check below still catches a truly bad token.
+EXPIRY_FILE=/workspace/github-token-expiry
+if [ -f "$EXPIRY_FILE" ]; then
+    EXPIRY=$(cat "$EXPIRY_FILE")
+    NOW=$(date +%s)
+    if [ "$NOW" -ge "$((EXPIRY - 60))" ]; then
+        echo "ERROR: GitHub App token is expired or expiring imminently." >&2
+        echo "  EXPIRY=${EXPIRY}  NOW=${NOW}  (threshold: EXPIRY-60=$((EXPIRY - 60)))" >&2
+        echo "  Re-queue the RemediationJob to obtain a fresh token." >&2
+        exit 1
+    fi
+else
+    echo "WARNING: /workspace/github-token-expiry not found — skipping expiry pre-flight check." >&2
+fi
+
 # Authenticate gh CLI using the token written by the init container.
 # Validate that authentication succeeds — a bad token would otherwise only be
 # discovered mid-investigation when gh pr list fails.

@@ -859,7 +859,6 @@ kubectl apply -k deploy/kustomize/
 | Branch | Purpose | Status | Created |
 |--------|---------|--------|---------|
 | `main` | Stable code | Active | 2026-02-19 |
-| `feature/epic22-token-expiry-guard` | Epic 22: GitHub App token expiry guard (FT-R3) | Active | 2026-02-25 |
 
 **Merged branches:**
 
@@ -877,6 +876,7 @@ kubectl apply -k deploy/kustomize/
 | `feature/epic11-self-remediation-cascade` | Epic 11 self-remediation cascade prevention (depth limit + circuit breaker) | 2026-02-25 | e7d731f |
 | `feature/epic25-tool-output-redaction` | Epic 25 tool call output redaction (wrappers + cmd/redact) | 2026-02-25 | 6df2e76 |
 | `feature/epic18-manifest-validation` | Epic 18 mandatory manifest validation — HARD RULE 10, STEP 7 mandatory | 2026-02-25 | 0684762 |
+| `feature/epic22-token-expiry-guard` | Epic 22: GitHub App token expiry guard (FT-R3) | 2026-02-25 | bc54774 |
 
 **Branch naming:**
 - Feature: `feature/short-description`

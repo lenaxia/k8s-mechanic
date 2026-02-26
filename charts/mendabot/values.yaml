@@ -51,6 +51,9 @@ watcher:
   watchNamespaces: ""
   # -- Comma-separated list of namespaces the watcher ignores. Empty means no exclusions. Example: `"kube-system,monitoring"`.
   excludeNamespaces: ""
+  # -- Enable dry-run shadow mode. When true, write operations are blocked and
+  # investigation reports are stored in RemediationJob.status.message.
+  dryRun: false
 
 # -- Agent runner type. Controls which AI agent binary runs inside the Job. Supported values: `"opencode"` (functional), `"claude"` (stub — not yet functional). Each type requires a corresponding Secret named `llm-credentials-<agentType>`. See `NOTES.txt` for the exact `kubectl create secret` commands.
 agentType: opencode

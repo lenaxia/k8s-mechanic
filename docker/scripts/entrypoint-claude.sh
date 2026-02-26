@@ -24,7 +24,6 @@ if [ "${DRY_RUN:-false}" = "true" ]; then
     # claude run "$(cat /tmp/rendered-prompt.txt)"   # TODO: verify invocation
     echo "ERROR: Claude Code entrypoint is not yet implemented." >&2
     exit 1
-    emit_dry_run_report
 else
     echo "ERROR: Claude Code entrypoint is not yet implemented." >&2
     exit 1

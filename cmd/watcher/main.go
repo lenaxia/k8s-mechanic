@@ -117,6 +117,12 @@ func main() {
 		logger.Fatal("jobbuilder init failed", zap.Error(err))
 	}
 
+	if cfg.DryRun {
+		logger.Info("dry-run mode enabled — agent Jobs will not create PRs; investigation reports stored in status.message",
+			zap.Bool("dryRun", true),
+		)
+	}
+
 	// Build the readiness checker that gates RemediationJob creation.
 	// The sink checker is selected by SINK_TYPE; unset/unknown = NopChecker.
 	// The LLM checker is selected by LLM_PROVIDER; unset = NopChecker (disabled).

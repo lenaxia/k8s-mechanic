@@ -72,8 +72,10 @@ spec:
         - name: EXCLUDE_NAMESPACES
           value: {{ .Values.watcher.excludeNamespaces | quote }}
         {{- end }}
-        # - name: DRY_RUN
-        #   value: "false"  # set "true" or "1" to enable dry-run mode
+        {{- if .Values.watcher.dryRun }}
+        - name: DRY_RUN
+          value: "true"
+        {{- end }}
         ports:
         - name: metrics
           containerPort: 8080

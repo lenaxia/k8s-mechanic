@@ -128,15 +128,61 @@ VARS='${FINDING_KIND}${FINDING_NAME}${FINDING_NAMESPACE}${FINDING_PARENT}${FINDI
 printf '%s' "$COMBINED_PROMPT" | envsubst "$VARS" > /tmp/rendered-prompt.txt
 
 # emit_dry_run_report — called by per-agent entrypoints after the agent binary
-# returns in dry-run mode. Emits the sentinel and report content to stdout so
-# the watcher can extract the report via the Kubernetes pod logs API.
+# returns in dry-run mode. Assembles the investigation report and proposed patch
+# into a Kubernetes ConfigMap so the controller can retrieve the full content
+# without relying on log line counts or arbitrary tail windows.
+#
+# ConfigMap name: mendabot-dryrun-<FINDING_FINGERPRINT>
+# Namespace:      AGENT_NAMESPACE (injected by jobbuilder)
+#
+# The ConfigMap contains two keys:
+#   report  — investigation-report.txt content (or a placeholder if absent)
+#   patch   — unified diff of all changes in /workspace/repo (empty if none)
+#
+# The controller reads both keys, concatenates them with a separator, stores the
+# result in rjob.status.message, then deletes the ConfigMap.
 emit_dry_run_report() {
     if [ "${DRY_RUN:-false}" = "true" ]; then
-        echo "=== DRY_RUN INVESTIGATION REPORT ==="
+        : "${AGENT_NAMESPACE:?AGENT_NAMESPACE must be set for dry-run report}"
+        : "${FINDING_FINGERPRINT:?FINDING_FINGERPRINT must be set for dry-run report}"
+
+        CM_NAME="mendabot-dryrun-${FINDING_FINGERPRINT}"
+
+        # Section 1: investigation report
         if [ -f /workspace/investigation-report.txt ]; then
-            cat /workspace/investigation-report.txt
+            REPORT=$(cat /workspace/investigation-report.txt)
         else
-            echo "(investigation-report.txt not found — agent may have exited without writing the report)"
+            REPORT="(investigation-report.txt not found — agent may have exited without writing the report)"
+        fi
+
+        # Section 2: proposed patch — staged+unstaged changes plus untracked files
+        PATCH=""
+        if [ -d /workspace/repo ]; then
+            PATCH=$(cd /workspace/repo && \
+                { git diff HEAD; \
+                  git ls-files --others --exclude-standard | \
+                      xargs -I{} git diff --no-index /dev/null {} 2>/dev/null || true; \
+                } 2>/dev/null)
+        fi
+
+        # Write ConfigMap. --from-literal handles arbitrary content safely.
+        # If creation fails, fall back to stdout so the operator is not left
+        # completely blind.
+        if kubectl create configmap "$CM_NAME" \
+            --namespace="$AGENT_NAMESPACE" \
+            --from-literal=report="$REPORT" \
+            --from-literal=patch="$PATCH" 2>/dev/null; then
+            echo "dry-run report written to ConfigMap ${AGENT_NAMESPACE}/${CM_NAME}" >&2
+        else
+            echo "WARNING: failed to write dry-run report ConfigMap; falling back to stdout" >&2
+            echo "=== DRY_RUN INVESTIGATION REPORT ==="
+            echo "$REPORT"
+            if [ -n "$PATCH" ]; then
+                echo ""
+                echo "=== PROPOSED PATCH ==="
+                echo "$PATCH"
+                echo "=== END PATCH ==="
+            fi
         fi
     fi
 }

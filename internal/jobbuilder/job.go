@@ -148,6 +148,9 @@ func (b *Builder) Build(rjob *v1alpha1.RemediationJob, correlatedFindings []v1al
 				},
 			},
 			{Name: "AGENT_TYPE", Value: string(b.cfg.AgentType)},
+			// AGENT_NAMESPACE tells emit_dry_run_report() which namespace to write
+			// the dry-run ConfigMap into. It equals the Job/Pod namespace.
+			{Name: "AGENT_NAMESPACE", Value: b.cfg.AgentNamespace},
 		},
 		VolumeMounts: []corev1.VolumeMount{
 			{

@@ -2,9 +2,6 @@ package controller_test
 
 import (
 	"context"
-	"fmt"
-	"io"
-	"net/http"
 	"strings"
 	"testing"
 
@@ -12,12 +9,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	kubefake "k8s.io/client-go/kubernetes/fake"
-	"k8s.io/client-go/kubernetes/scheme"
-	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
-	restclient "k8s.io/client-go/rest"
-	fakerest "k8s.io/client-go/rest/fake"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	v1alpha1 "github.com/lenaxia/k8s-mendabot/api/v1alpha1"
@@ -25,88 +18,8 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// Fake kubernetes.Interface for dry-run log-stream tests
+// Helpers
 // ---------------------------------------------------------------------------
-
-// fakeLogKubeClient is a kubernetes.Interface that delegates to fake.Clientset
-// but overrides CoreV1().Pods().GetLogs() to return configurable log content.
-type fakeLogKubeClient struct {
-	*kubefake.Clientset
-	logContent string
-	logErr     error
-}
-
-func newFakeLogKubeClient(logContent string, logErr error) *fakeLogKubeClient {
-	return &fakeLogKubeClient{
-		Clientset:  kubefake.NewClientset(),
-		logContent: logContent,
-		logErr:     logErr,
-	}
-}
-
-func (f *fakeLogKubeClient) CoreV1() corev1client.CoreV1Interface {
-	return &fakeCoreV1{
-		CoreV1Interface: f.Clientset.CoreV1(),
-		logContent:      f.logContent,
-		logErr:          f.logErr,
-	}
-}
-
-// fakeCoreV1 wraps CoreV1Interface and overrides Pods() to inject log behaviour.
-type fakeCoreV1 struct {
-	corev1client.CoreV1Interface
-	logContent string
-	logErr     error
-}
-
-func (f *fakeCoreV1) Pods(namespace string) corev1client.PodInterface {
-	return &fakePodClient{
-		PodInterface: f.CoreV1Interface.Pods(namespace),
-		namespace:    namespace,
-		logContent:   f.logContent,
-		logErr:       f.logErr,
-	}
-}
-
-// fakePodClient wraps PodInterface and overrides GetLogs.
-type fakePodClient struct {
-	corev1client.PodInterface
-	namespace  string
-	logContent string
-	logErr     error
-}
-
-func (f *fakePodClient) GetLogs(name string, opts *corev1.PodLogOptions) *restclient.Request {
-	if f.logErr != nil {
-		fakeClient := &fakerest.RESTClient{
-			Client: fakerest.CreateHTTPClient(func(_ *http.Request) (*http.Response, error) {
-				return nil, f.logErr
-			}),
-			NegotiatedSerializer: scheme.Codecs.WithoutConversion(),
-			GroupVersion:         corev1.SchemeGroupVersion,
-			VersionedAPIPath:     fmt.Sprintf("/api/v1/namespaces/%s/pods/%s/log", f.namespace, name),
-		}
-		return fakeClient.Request()
-	}
-	fakeClient := &fakerest.RESTClient{
-		Client: fakerest.CreateHTTPClient(func(_ *http.Request) (*http.Response, error) {
-			return &http.Response{
-				StatusCode: http.StatusOK,
-				Body:       io.NopCloser(strings.NewReader(f.logContent)),
-			}, nil
-		}),
-		NegotiatedSerializer: scheme.Codecs.WithoutConversion(),
-		GroupVersion:         corev1.SchemeGroupVersion,
-		VersionedAPIPath:     fmt.Sprintf("/api/v1/namespaces/%s/pods/%s/log", f.namespace, name),
-	}
-	return fakeClient.Request()
-}
-
-// ---------------------------------------------------------------------------
-// Helper
-// ---------------------------------------------------------------------------
-
-const dryRunSentinel = "=== DRY_RUN INVESTIGATION REPORT ==="
 
 func newDryRunRJobWithJob(
 	rjobName, fp string,
@@ -136,37 +49,53 @@ func newDryRunRJobWithJob(
 	return rjob, job
 }
 
-func newSucceededPod(podName, namespace, jobName string) *corev1.Pod {
-	return &corev1.Pod{
+// newDryRunCM creates the ConfigMap that emit_dry_run_report() would write.
+// cmName must match controller.dryRunCMName(fp).
+func newDryRunCM(cmName, namespace, report, patch string) *corev1.ConfigMap {
+	return &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      podName,
+			Name:      cmName,
 			Namespace: namespace,
-			Labels:    map[string]string{"batch.kubernetes.io/job-name": jobName},
 		},
-		Status: corev1.PodStatus{Phase: corev1.PodSucceeded},
+		Data: map[string]string{
+			"report": report,
+			"patch":  patch,
+		},
 	}
+}
+
+// dryRunCMName mirrors the private function in the controller package so tests
+// can derive the expected ConfigMap name from a fingerprint.
+func dryRunCMName(fp string) string {
+	if len(fp) > 12 {
+		fp = fp[:12]
+	}
+	return "mendabot-dryrun-" + fp
 }
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
-// TestFetchDryRunReport_NilKubeClient verifies that when KubeClient is nil,
-// the reconciler does not panic and sets Message to the "not configured" string.
-// We verify this by testing through the reconcile loop with KubeClient = nil
-// on a dry-run-annotated succeeded job.
-func TestFetchDryRunReport_NilKubeClient(t *testing.T) {
+// TestReconcile_DryRunSucceeded_ReportAndPatchStored verifies the happy path:
+// ConfigMap present with report+patch → both appear in status.message; CM deleted.
+func TestReconcile_DryRunSucceeded_ReportAndPatchStored(t *testing.T) {
 	const fp = "abcdefghijklmnopqrstuvwxyz012345abcdefghijklmnopqrstuvwxyz012345"
 	rjob, job := newDryRunRJobWithJob(
-		"test-dryrun-nilclient", fp, v1alpha1.PhaseDispatched,
+		"test-dryrun-full", fp, v1alpha1.PhaseDispatched,
 		map[string]string{"mendabot.io/dry-run": "true"},
+	)
+
+	cm := newDryRunCM(dryRunCMName(fp), testNamespace,
+		"## Root Cause\nImagePullBackOff — image not found.",
+		"diff --git a/foo.yaml b/foo.yaml\n--- a/foo.yaml\n+++ b/foo.yaml\n@@ -1 +1 @@\n-old\n+new",
 	)
 
 	s := newTestScheme(t)
 	c := fake.NewClientBuilder().
 		WithScheme(s).
 		WithStatusSubresource(&v1alpha1.RemediationJob{}).
-		WithObjects(rjob, job).
+		WithObjects(rjob, job, cm).
 		Build()
 
 	r := &controller.RemediationJobReconciler{
@@ -174,179 +103,98 @@ func TestFetchDryRunReport_NilKubeClient(t *testing.T) {
 		Scheme:     s,
 		JobBuilder: &fakeJobBuilder{},
 		Cfg:        defaultCfg(),
-		KubeClient: nil, // nil — triggers the "not configured" fallback
 	}
 
 	_, err := r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: types.NamespacedName{Name: "test-dryrun-nilclient", Namespace: testNamespace},
+		NamespacedName: types.NamespacedName{Name: "test-dryrun-full", Namespace: testNamespace},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	var updated v1alpha1.RemediationJob
-	if err := c.Get(context.Background(), types.NamespacedName{Name: "test-dryrun-nilclient", Namespace: testNamespace}, &updated); err != nil {
-		t.Fatalf("get rjob: %v", err)
-	}
-	want := "dry-run report unavailable: KubeClient not configured"
-	if updated.Status.Message != want {
-		t.Errorf("Message = %q, want %q", updated.Status.Message, want)
-	}
-}
-
-// TestReconcile_DryRunSucceeded_ReportStored verifies the full dry-run report
-// extraction: sentinel present → Message contains post-sentinel text.
-func TestReconcile_DryRunSucceeded_ReportStored(t *testing.T) {
-	const fp = "abcdefghijklmnopqrstuvwxyz012345abcdefghijklmnopqrstuvwxyz012345"
-	rjob, job := newDryRunRJobWithJob(
-		"test-dryrun-stored", fp, v1alpha1.PhaseDispatched,
-		map[string]string{"mendabot.io/dry-run": "true"},
-	)
-
-	pod := newSucceededPod("test-pod-stored", testNamespace, job.Name)
-
-	s := newTestScheme(t)
-	c := fake.NewClientBuilder().
-		WithScheme(s).
-		WithStatusSubresource(&v1alpha1.RemediationJob{}).
-		WithObjects(rjob, job, pod).
-		Build()
-
-	logContent := dryRunSentinel + "\n## Root Cause\nImagePullBackOff — image not found."
-	kubeClient := newFakeLogKubeClient(logContent, nil)
-
-	r := &controller.RemediationJobReconciler{
-		Client:     c,
-		Scheme:     s,
-		JobBuilder: &fakeJobBuilder{},
-		Cfg:        defaultCfg(),
-		KubeClient: kubeClient,
-	}
-
-	_, err := r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: types.NamespacedName{Name: "test-dryrun-stored", Namespace: testNamespace},
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	var updated v1alpha1.RemediationJob
-	if err := c.Get(context.Background(), types.NamespacedName{Name: "test-dryrun-stored", Namespace: testNamespace}, &updated); err != nil {
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "test-dryrun-full", Namespace: testNamespace}, &updated); err != nil {
 		t.Fatalf("get rjob: %v", err)
 	}
 	if updated.Status.Phase != v1alpha1.PhaseSucceeded {
 		t.Errorf("phase = %q, want %q", updated.Status.Phase, v1alpha1.PhaseSucceeded)
 	}
 	if !strings.Contains(updated.Status.Message, "ImagePullBackOff") {
-		t.Errorf("Message = %q — want it to contain post-sentinel report text", updated.Status.Message)
+		t.Errorf("Message = %q — want report content", updated.Status.Message)
 	}
-	if strings.Contains(updated.Status.Message, dryRunSentinel) {
-		t.Errorf("Message = %q — must NOT contain the sentinel line itself", updated.Status.Message)
+	if !strings.Contains(updated.Status.Message, "PROPOSED PATCH") {
+		t.Errorf("Message = %q — want patch section", updated.Status.Message)
+	}
+	if !strings.Contains(updated.Status.Message, "+new") {
+		t.Errorf("Message = %q — want patch content", updated.Status.Message)
+	}
+
+	// ConfigMap must be deleted after reading.
+	var remaining corev1.ConfigMap
+	err = c.Get(context.Background(), types.NamespacedName{Name: dryRunCMName(fp), Namespace: testNamespace}, &remaining)
+	if err == nil {
+		t.Error("expected ConfigMap to be deleted after reading, but it still exists")
 	}
 }
 
-// TestReconcile_DryRunSucceeded_ReportAfterSentinel verifies that content after
-// the sentinel is extracted correctly even when there is preamble content before it.
-func TestReconcile_DryRunSucceeded_ReportAfterSentinel(t *testing.T) {
+// TestReconcile_DryRunSucceeded_ReportOnlyNoPatch verifies that when the patch
+// key is empty, the PROPOSED PATCH section is omitted from status.message.
+func TestReconcile_DryRunSucceeded_ReportOnlyNoPatch(t *testing.T) {
 	const fp = "abcdefghijklmnopqrstuvwxyz012345abcdefghijklmnopqrstuvwxyz012345"
 	rjob, job := newDryRunRJobWithJob(
-		"test-dryrun-after", fp, v1alpha1.PhaseDispatched,
+		"test-dryrun-nopatch", fp, v1alpha1.PhaseDispatched,
 		map[string]string{"mendabot.io/dry-run": "true"},
 	)
 
-	pod := newSucceededPod("test-pod-after", testNamespace, job.Name)
+	cm := newDryRunCM(dryRunCMName(fp), testNamespace,
+		"## Root Cause\nThe image tag was wrong.",
+		"", // no patch
+	)
 
 	s := newTestScheme(t)
 	c := fake.NewClientBuilder().
 		WithScheme(s).
 		WithStatusSubresource(&v1alpha1.RemediationJob{}).
-		WithObjects(rjob, job, pod).
+		WithObjects(rjob, job, cm).
 		Build()
-
-	// Preamble before sentinel followed by the actual report content.
-	// The controller tails the last 300 lines so the sentinel is always visible.
-	reportContent := "## Investigation Report\nRoot cause: broken image."
-	logContent := "preamble line 1\npreamble line 2\n" + dryRunSentinel + "\n" + reportContent
-	kubeClient := newFakeLogKubeClient(logContent, nil)
 
 	r := &controller.RemediationJobReconciler{
 		Client:     c,
 		Scheme:     s,
 		JobBuilder: &fakeJobBuilder{},
 		Cfg:        defaultCfg(),
-		KubeClient: kubeClient,
 	}
 
 	_, err := r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: types.NamespacedName{Name: "test-dryrun-after", Namespace: testNamespace},
+		NamespacedName: types.NamespacedName{Name: "test-dryrun-nopatch", Namespace: testNamespace},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	var updated v1alpha1.RemediationJob
-	if err := c.Get(context.Background(), types.NamespacedName{Name: "test-dryrun-after", Namespace: testNamespace}, &updated); err != nil {
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "test-dryrun-nopatch", Namespace: testNamespace}, &updated); err != nil {
 		t.Fatalf("get rjob: %v", err)
 	}
-	if updated.Status.Message != reportContent {
-		t.Errorf("Message = %q, want %q", updated.Status.Message, reportContent)
+	if !strings.Contains(updated.Status.Message, "image tag was wrong") {
+		t.Errorf("Message = %q — want report content", updated.Status.Message)
+	}
+	if strings.Contains(updated.Status.Message, "PROPOSED PATCH") {
+		t.Errorf("Message = %q — must NOT contain patch section when patch is empty", updated.Status.Message)
 	}
 }
 
-// TestReconcile_DryRunSucceeded_SentinelAbsent verifies that when no sentinel
-// is present, Message starts with "(sentinel not found".
-func TestReconcile_DryRunSucceeded_SentinelAbsent(t *testing.T) {
+// TestReconcile_DryRunSucceeded_CMNotFound verifies that when the ConfigMap is
+// absent (agent crashed before writing it), Message starts with
+// "dry-run report unavailable".
+func TestReconcile_DryRunSucceeded_CMNotFound(t *testing.T) {
 	const fp = "abcdefghijklmnopqrstuvwxyz012345abcdefghijklmnopqrstuvwxyz012345"
 	rjob, job := newDryRunRJobWithJob(
-		"test-dryrun-nosentinel", fp, v1alpha1.PhaseDispatched,
+		"test-dryrun-nocm", fp, v1alpha1.PhaseDispatched,
 		map[string]string{"mendabot.io/dry-run": "true"},
 	)
 
-	pod := newSucceededPod("test-pod-nosentinel", testNamespace, job.Name)
-
-	s := newTestScheme(t)
-	c := fake.NewClientBuilder().
-		WithScheme(s).
-		WithStatusSubresource(&v1alpha1.RemediationJob{}).
-		WithObjects(rjob, job, pod).
-		Build()
-
-	kubeClient := newFakeLogKubeClient("agent output without any sentinel line", nil)
-
-	r := &controller.RemediationJobReconciler{
-		Client:     c,
-		Scheme:     s,
-		JobBuilder: &fakeJobBuilder{},
-		Cfg:        defaultCfg(),
-		KubeClient: kubeClient,
-	}
-
-	_, err := r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: types.NamespacedName{Name: "test-dryrun-nosentinel", Namespace: testNamespace},
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	var updated v1alpha1.RemediationJob
-	if err := c.Get(context.Background(), types.NamespacedName{Name: "test-dryrun-nosentinel", Namespace: testNamespace}, &updated); err != nil {
-		t.Fatalf("get rjob: %v", err)
-	}
-	if !strings.HasPrefix(updated.Status.Message, "(sentinel not found") {
-		t.Errorf("Message = %q, want prefix \"(sentinel not found\"", updated.Status.Message)
-	}
-}
-
-// TestReconcile_DryRunSucceeded_NoPodFound verifies that when no succeeded pod
-// exists, Message starts with "dry-run report unavailable".
-func TestReconcile_DryRunSucceeded_NoPodFound(t *testing.T) {
-	const fp = "abcdefghijklmnopqrstuvwxyz012345abcdefghijklmnopqrstuvwxyz012345"
-	rjob, job := newDryRunRJobWithJob(
-		"test-dryrun-nopod", fp, v1alpha1.PhaseDispatched,
-		map[string]string{"mendabot.io/dry-run": "true"},
-	)
-
-	// No pod objects — pod list will be empty.
+	// No ConfigMap created.
 	s := newTestScheme(t)
 	c := fake.NewClientBuilder().
 		WithScheme(s).
@@ -354,25 +202,22 @@ func TestReconcile_DryRunSucceeded_NoPodFound(t *testing.T) {
 		WithObjects(rjob, job).
 		Build()
 
-	kubeClient := newFakeLogKubeClient("irrelevant", nil)
-
 	r := &controller.RemediationJobReconciler{
 		Client:     c,
 		Scheme:     s,
 		JobBuilder: &fakeJobBuilder{},
 		Cfg:        defaultCfg(),
-		KubeClient: kubeClient,
 	}
 
 	_, err := r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: types.NamespacedName{Name: "test-dryrun-nopod", Namespace: testNamespace},
+		NamespacedName: types.NamespacedName{Name: "test-dryrun-nocm", Namespace: testNamespace},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	var updated v1alpha1.RemediationJob
-	if err := c.Get(context.Background(), types.NamespacedName{Name: "test-dryrun-nopod", Namespace: testNamespace}, &updated); err != nil {
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "test-dryrun-nocm", Namespace: testNamespace}, &updated); err != nil {
 		t.Fatalf("get rjob: %v", err)
 	}
 	if !strings.HasPrefix(updated.Status.Message, "dry-run report unavailable") {
@@ -396,14 +241,11 @@ func TestReconcile_NoDryRun_MessageNotPopulated(t *testing.T) {
 		WithObjects(rjob, job).
 		Build()
 
-	kubeClient := newFakeLogKubeClient("should not be reached", nil)
-
 	r := &controller.RemediationJobReconciler{
 		Client:     c,
 		Scheme:     s,
 		JobBuilder: &fakeJobBuilder{},
 		Cfg:        defaultCfg(),
-		KubeClient: kubeClient,
 	}
 
 	_, err := r.Reconcile(context.Background(), ctrl.Request{
@@ -422,62 +264,9 @@ func TestReconcile_NoDryRun_MessageNotPopulated(t *testing.T) {
 	}
 }
 
-// TestReconcile_DryRunSucceeded_LogStreamError verifies that when Stream()
-// returns an error, Message starts with "dry-run report unavailable" and the
-// reconciler does not panic.
-func TestReconcile_DryRunSucceeded_LogStreamError(t *testing.T) {
-	const fp = "abcdefghijklmnopqrstuvwxyz012345abcdefghijklmnopqrstuvwxyz012345"
-	rjob, job := newDryRunRJobWithJob(
-		"test-dryrun-streamerr", fp, v1alpha1.PhaseDispatched,
-		map[string]string{"mendabot.io/dry-run": "true"},
-	)
-
-	pod := newSucceededPod("test-pod-streamerr", testNamespace, job.Name)
-
-	s := newTestScheme(t)
-	c := fake.NewClientBuilder().
-		WithScheme(s).
-		WithStatusSubresource(&v1alpha1.RemediationJob{}).
-		WithObjects(rjob, job, pod).
-		Build()
-
-	streamErr := fmt.Errorf("connection refused")
-	kubeClient := newFakeLogKubeClient("", streamErr)
-
-	r := &controller.RemediationJobReconciler{
-		Client:     c,
-		Scheme:     s,
-		JobBuilder: &fakeJobBuilder{},
-		Cfg:        defaultCfg(),
-		KubeClient: kubeClient,
-	}
-
-	_, err := r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: types.NamespacedName{Name: "test-dryrun-streamerr", Namespace: testNamespace},
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	var updated v1alpha1.RemediationJob
-	if err := c.Get(context.Background(), types.NamespacedName{Name: "test-dryrun-streamerr", Namespace: testNamespace}, &updated); err != nil {
-		t.Fatalf("get rjob: %v", err)
-	}
-	if !strings.HasPrefix(updated.Status.Message, "dry-run report unavailable") {
-		t.Errorf("Message = %q, want prefix \"dry-run report unavailable\"", updated.Status.Message)
-	}
-}
-
 // TestReconcile_DryRunSucceeded_MessageAlreadySet verifies that when
-// rjob.Status.Message is already set, the reconciler does not call
-// fetchDryRunReport again — confirming the idempotency guard at controller.go:178.
-//
-// The rjob starts in PhaseDispatched with Message pre-populated so the
-// reconciler enters the owned-jobs loop (not the PhaseSucceeded short-circuit).
-// The owned Job has Succeeded=1, so syncPhaseFromJob returns PhaseSucceeded.
-// The guard fires: newPhase==PhaseSucceeded && dry-run annotation present &&
-// rjob.Status.Message != "" → fetchDryRunReport is NOT called → Message stays
-// as "existing report". Phase is updated to PhaseSucceeded.
+// rjob.Status.Message is already set, the reconciler does not overwrite it
+// and does not attempt to read the ConfigMap again.
 func TestReconcile_DryRunSucceeded_MessageAlreadySet(t *testing.T) {
 	const fp = "abcdefghijklmnopqrstuvwxyz012345abcdefghijklmnopqrstuvwxyz012345"
 	rjob, job := newDryRunRJobWithJob(
@@ -486,25 +275,22 @@ func TestReconcile_DryRunSucceeded_MessageAlreadySet(t *testing.T) {
 	)
 	rjob.Status.Message = "existing report"
 
-	pod := newSucceededPod("test-pod-alreadyset", testNamespace, job.Name)
+	// A CM exists with different content — if idempotency guard fires, CM is
+	// NOT read and Message stays "existing report".
+	cm := newDryRunCM(dryRunCMName(fp), testNamespace, "NEW CONTENT", "")
 
 	s := newTestScheme(t)
 	c := fake.NewClientBuilder().
 		WithScheme(s).
 		WithStatusSubresource(&v1alpha1.RemediationJob{}).
-		WithObjects(rjob, job, pod).
+		WithObjects(rjob, job, cm).
 		Build()
-
-	// If fetchDryRunReport were called, it would return content containing "NEW CONTENT".
-	// The assertion below proves the guard fired and fetchDryRunReport was NOT invoked.
-	kubeClient := newFakeLogKubeClient(dryRunSentinel+"\nNEW CONTENT", nil)
 
 	r := &controller.RemediationJobReconciler{
 		Client:     c,
 		Scheme:     s,
 		JobBuilder: &fakeJobBuilder{},
 		Cfg:        defaultCfg(),
-		KubeClient: kubeClient,
 	}
 
 	_, err := r.Reconcile(context.Background(), ctrl.Request{
@@ -522,11 +308,170 @@ func TestReconcile_DryRunSucceeded_MessageAlreadySet(t *testing.T) {
 		t.Errorf("Message = %q, want \"existing report\" — idempotency guard must prevent overwrite", updated.Status.Message)
 	}
 	if updated.Status.Phase != v1alpha1.PhaseSucceeded {
-		t.Errorf("Phase = %q, want %q — reconcile must progress phase from Dispatched to Succeeded", updated.Status.Phase, v1alpha1.PhaseSucceeded)
+		t.Errorf("Phase = %q, want %q", updated.Status.Phase, v1alpha1.PhaseSucceeded)
+	}
+
+	// CM must NOT have been deleted (guard fired before fetchDryRunReport).
+	var remaining corev1.ConfigMap
+	if err := c.Get(context.Background(), types.NamespacedName{Name: dryRunCMName(fp), Namespace: testNamespace}, &remaining); err != nil {
+		t.Error("expected ConfigMap to still exist when idempotency guard fired, but it was deleted")
 	}
 }
 
-// Verify our fake implements the interface (compile-time check).
-var _ interface {
-	CoreV1() corev1client.CoreV1Interface
-} = (*fakeLogKubeClient)(nil)
+// TestReconcile_DryRunSucceeded_CMNameDerivedFromFingerprint verifies that the
+// controller constructs the ConfigMap name as "mendabot-dryrun-<fp[:12]>", which
+// must match what emit_dry_run_report() writes.
+func TestReconcile_DryRunSucceeded_CMNameDerivedFromFingerprint(t *testing.T) {
+	const fp = "aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899"
+	rjob, job := newDryRunRJobWithJob(
+		"test-dryrun-cmname", fp, v1alpha1.PhaseDispatched,
+		map[string]string{"mendabot.io/dry-run": "true"},
+	)
+
+	// Use a well-known CM name derived from the fingerprint prefix.
+	expectedCMName := "mendabot-dryrun-aabbccddeeff"
+	cm := newDryRunCM(expectedCMName, testNamespace, "root cause found", "")
+
+	s := newTestScheme(t)
+	c := fake.NewClientBuilder().
+		WithScheme(s).
+		WithStatusSubresource(&v1alpha1.RemediationJob{}).
+		WithObjects(rjob, job, cm).
+		Build()
+
+	r := &controller.RemediationJobReconciler{
+		Client:     c,
+		Scheme:     s,
+		JobBuilder: &fakeJobBuilder{},
+		Cfg:        defaultCfg(),
+	}
+
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "test-dryrun-cmname", Namespace: testNamespace},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var updated v1alpha1.RemediationJob
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "test-dryrun-cmname", Namespace: testNamespace}, &updated); err != nil {
+		t.Fatalf("get rjob: %v", err)
+	}
+	if !strings.Contains(updated.Status.Message, "root cause found") {
+		t.Errorf("Message = %q — expected report content; CM name derivation may be wrong", updated.Status.Message)
+	}
+
+	// Verify the CM was consumed (deleted).
+	var remaining corev1.ConfigMap
+	err = c.Get(context.Background(), types.NamespacedName{Name: expectedCMName, Namespace: testNamespace}, &remaining)
+	if err == nil {
+		t.Error("expected ConfigMap to be deleted after reading")
+	}
+
+	// Also confirm a CM with the wrong name would NOT have been consumed.
+	wrongName := "mendabot-dryrun-wrongname12"
+	wrongCM := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: wrongName, Namespace: testNamespace},
+		Data:       map[string]string{"report": "should not appear"},
+	}
+	c2 := fake.NewClientBuilder().
+		WithScheme(s).
+		WithStatusSubresource(&v1alpha1.RemediationJob{}).
+		WithObjects(rjob, job, wrongCM).
+		Build()
+	// Reset rjob phase for second run.
+	rjob2 := rjob.DeepCopyObject().(*v1alpha1.RemediationJob)
+	rjob2.Status.Message = ""
+	if patchErr := c2.Status().Update(context.Background(), rjob2); patchErr != nil {
+		t.Fatalf("reset rjob: %v", patchErr)
+	}
+	r2 := &controller.RemediationJobReconciler{
+		Client:     c2,
+		Scheme:     s,
+		JobBuilder: &fakeJobBuilder{},
+		Cfg:        defaultCfg(),
+	}
+	_, _ = r2.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "test-dryrun-cmname", Namespace: testNamespace},
+	})
+	var updated2 v1alpha1.RemediationJob
+	if err := c2.Get(context.Background(), types.NamespacedName{Name: "test-dryrun-cmname", Namespace: testNamespace}, &updated2); err != nil {
+		t.Fatalf("get rjob2: %v", err)
+	}
+	if strings.Contains(updated2.Status.Message, "should not appear") {
+		t.Errorf("wrong CM name was used; message = %q", updated2.Status.Message)
+	}
+	// wrongCM must still exist (was never found by the controller).
+	var stillThere corev1.ConfigMap
+	if err := c2.Get(context.Background(), types.NamespacedName{Name: wrongName, Namespace: testNamespace}, &stillThere); err != nil {
+		t.Error("wrong-named CM was unexpectedly deleted")
+	}
+}
+
+// TestReconcile_DryRunSucceeded_CMDeletedAfterRead verifies the controller
+// performs a best-effort delete after reading, so stale CMs do not accumulate.
+// (This is implicitly covered by TestReconcile_DryRunSucceeded_ReportAndPatchStored
+// but is kept as an explicit, focused test.)
+func TestReconcile_DryRunSucceeded_CMDeletedAfterRead(t *testing.T) {
+	const fp = "abcdefghijklmnopqrstuvwxyz012345abcdefghijklmnopqrstuvwxyz012345"
+	rjob, job := newDryRunRJobWithJob(
+		"test-dryrun-cmdelete", fp, v1alpha1.PhaseDispatched,
+		map[string]string{"mendabot.io/dry-run": "true"},
+	)
+
+	cmName := dryRunCMName(fp)
+	cm := newDryRunCM(cmName, testNamespace, "some report", "some patch")
+
+	s := newTestScheme(t)
+	c := fake.NewClientBuilder().
+		WithScheme(s).
+		WithStatusSubresource(&v1alpha1.RemediationJob{}).
+		WithObjects(rjob, job, cm).
+		Build()
+
+	r := &controller.RemediationJobReconciler{
+		Client:     c,
+		Scheme:     s,
+		JobBuilder: &fakeJobBuilder{},
+		Cfg:        defaultCfg(),
+	}
+
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "test-dryrun-cmdelete", Namespace: testNamespace},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var remaining corev1.ConfigMap
+	err = c.Get(context.Background(), types.NamespacedName{Name: cmName, Namespace: testNamespace}, &remaining)
+	if err == nil {
+		t.Errorf("ConfigMap %q still exists after reconcile — expected deletion", cmName)
+	}
+
+	// Confirm other ConfigMaps in the namespace are not affected.
+	unrelated := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "unrelated-cm", Namespace: testNamespace},
+		Data:       map[string]string{"key": "value"},
+	}
+	c2 := fake.NewClientBuilder().
+		WithScheme(s).
+		WithStatusSubresource(&v1alpha1.RemediationJob{}).
+		WithObjects(rjob, job, cm, unrelated).
+		Build()
+	r2 := &controller.RemediationJobReconciler{
+		Client:     c2,
+		Scheme:     s,
+		JobBuilder: &fakeJobBuilder{},
+		Cfg:        defaultCfg(),
+	}
+	_, _ = r2.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "test-dryrun-cmdelete", Namespace: testNamespace},
+	})
+	var unrelatedCM corev1.ConfigMap
+	if err := c2.Get(context.Background(), types.NamespacedName{Name: "unrelated-cm", Namespace: testNamespace}, &unrelatedCM); err != nil {
+		t.Error("unrelated ConfigMap was unexpectedly deleted")
+	}
+
+	_ = client.IgnoreNotFound(err)
+}

@@ -10,4 +10,7 @@ rules:
 - apiGroups: ["remediation.mendabot.io"]
   resources: ["remediationjobs/status"]
   verbs: ["get", "patch"]
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["create"]
 {{- end }}

@@ -105,16 +105,7 @@ func (r *RemediationJobReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 				zap.String("prRef", rjob.Status.PRRef),
 			)
 		}
-		// CompletedAt is nil — the terminal status-patch for this job failed in a
-		// prior reconcile (the owned-jobs sync set Phase=Succeeded but couldn't write
-		// CompletedAt). Patch it now so the TTL clock can start on the next reconcile.
-		rjobCopy := rjob.DeepCopyObject().(*v1alpha1.RemediationJob)
-		now := metav1.Now()
-		rjob.Status.CompletedAt = &now
-		if err := r.Status().Patch(ctx, &rjob, client.MergeFrom(rjobCopy)); err != nil {
-			return ctrl.Result{}, err
-		}
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{}, nil
 
 	case v1alpha1.PhaseFailed:
 		return ctrl.Result{}, nil
@@ -126,6 +117,25 @@ func (r *RemediationJobReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, nil
 
 	case v1alpha1.PhaseSuppressed:
+		// Suppressed jobs are terminal; apply the same TTL deletion as PhaseSucceeded
+		// so they don't accumulate indefinitely in etcd.
+		if rjob.Status.CompletedAt == nil {
+			// Safety net: CompletedAt was not set during suppression (e.g. patch lost).
+			now := metav1.Now()
+			rjobCopy := rjob.DeepCopyObject().(*v1alpha1.RemediationJob)
+			rjobCopy.Status.CompletedAt = &now
+			if err := r.Status().Patch(ctx, rjobCopy, client.MergeFrom(&rjob)); err != nil && !apierrors.IsNotFound(err) {
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{RequeueAfter: time.Second}, nil
+		}
+		deadline := rjob.Status.CompletedAt.Add(ttl)
+		if time.Now().Before(deadline) {
+			return ctrl.Result{RequeueAfter: time.Until(deadline)}, nil
+		}
+		if err := r.Delete(ctx, &rjob); err != nil && !apierrors.IsNotFound(err) {
+			return ctrl.Result{}, err
+		}
 		return ctrl.Result{}, nil
 
 	case v1alpha1.PhaseDispatched, v1alpha1.PhaseRunning:
@@ -294,7 +304,9 @@ func (r *RemediationJobReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 		if found {
 			if group.PrimaryUID != rjob.UID {
-				var primaryJob v1alpha1.RemediationJob
+				// Check whether the designated primary still exists. We need only the
+				// existence flag — we do not use the primary's content, so avoid
+				// storing it in a variable that would mislead future readers.
 				primaryGone := true
 				var allInNS v1alpha1.RemediationJobList
 				if listErr := r.List(ctx, &allInNS,
@@ -305,14 +317,19 @@ func (r *RemediationJobReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 				} else {
 					for i := range allInNS.Items {
 						if allInNS.Items[i].UID == group.PrimaryUID {
-							primaryJob = allInNS.Items[i]
 							primaryGone = false
 							break
 						}
 					}
 				}
-				_ = primaryJob
-				gracePeriod := 3 * time.Duration(r.Cfg.CorrelationWindowSeconds) * time.Second
+				// Use a minimum grace period of 10 s so that window==0 configurations
+				// still give the primary a chance to reconcile before the non-primary
+				// falls back to solo dispatch.
+				const minGracePeriod = 10 * time.Second
+				gracePeriod := 3 * window
+				if gracePeriod < minGracePeriod {
+					gracePeriod = minGracePeriod
+				}
 				waitedLongEnough := time.Since(rjob.CreationTimestamp.Time) > gracePeriod+window
 				if primaryGone && waitedLongEnough {
 					if r.Log != nil {
@@ -321,6 +338,14 @@ func (r *RemediationJobReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 							zap.String("expectedPrimaryUID", string(group.PrimaryUID)),
 						)
 					}
+					// Explicit solo dispatch — do not fall through to the bottom of the
+					// function, which would also solo-dispatch but without this log context.
+					if limited, res, err := r.concurrencyGate(ctx); err != nil {
+						return ctrl.Result{}, err
+					} else if limited {
+						return res, nil
+					}
+					return ctrl.Result{}, r.dispatch(ctx, &rjob, nil)
 				} else {
 					return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 				}
@@ -668,6 +693,8 @@ func (r *RemediationJobReconciler) transitionSuppressed(
 	rjobCopy := rjob.DeepCopyObject().(*v1alpha1.RemediationJob)
 	rjob.Status.Phase = v1alpha1.PhaseSuppressed
 	rjob.Status.CorrelationGroupID = groupID
+	now := metav1.Now()
+	rjob.Status.CompletedAt = &now
 	apimeta.SetStatusCondition(&rjob.Status.Conditions, metav1.Condition{
 		Type:               v1alpha1.ConditionCorrelationSuppressed,
 		Status:             metav1.ConditionTrue,

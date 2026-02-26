@@ -1133,27 +1133,56 @@ func TestRemediationJobReconciler_InjectionInErrors_Suppress(t *testing.T) {
 	}
 }
 
-// TestRemediationJobReconciler_Suppressed_ReturnsNil verifies PhaseSuppressed → nil
-// returned immediately, no job created.
-func TestRemediationJobReconciler_Suppressed_ReturnsNil(t *testing.T) {
+// TestRemediationJobReconciler_Suppressed_TTL verifies PhaseSuppressed TTL behaviour:
+//   - When CompletedAt is nil, the safety-net sets it and requeues with 1s.
+//   - When CompletedAt is set and TTL has not elapsed, returns RequeueAfter > 0.
+//   - No Build() calls in either case.
+func TestRemediationJobReconciler_Suppressed_TTL(t *testing.T) {
 	const fp = "abcdefghijklmnopqrstuvwxyz012345abcdefghijklmnopqrstuvwxyz012345"
-	rjob := newRJob("test-rjob", fp)
-	rjob.Status.Phase = v1alpha1.PhaseSuppressed
 
-	c := newFakeClient(t, rjob)
-	jb := &fakeJobBuilder{}
-	r := newReconciler(t, c, jb, defaultCfg())
+	t.Run("CompletedAt_nil_safety_net", func(t *testing.T) {
+		rjob := newRJob("test-rjob", fp)
+		rjob.Status.Phase = v1alpha1.PhaseSuppressed
+		// CompletedAt is intentionally nil — safety-net path.
 
-	result, err := r.Reconcile(context.Background(), rjobReqFor("test-rjob"))
-	if err != nil {
-		t.Errorf("expected nil error for Suppressed phase, got %v", err)
-	}
-	if result.RequeueAfter != 0 || result.Requeue {
-		t.Errorf("expected zero Result for Suppressed phase, got %+v", result)
-	}
-	if len(jb.calls) != 0 {
-		t.Error("expected no Build() calls for Suppressed phase")
-	}
+		c := newFakeClient(t, rjob)
+		jb := &fakeJobBuilder{}
+		r := newReconciler(t, c, jb, defaultCfg())
+
+		result, err := r.Reconcile(context.Background(), rjobReqFor("test-rjob"))
+		if err != nil {
+			t.Errorf("expected nil error, got %v", err)
+		}
+		// Safety-net sets CompletedAt and requeues after 1s.
+		if result.RequeueAfter != time.Second {
+			t.Errorf("expected RequeueAfter=1s (safety-net), got %v", result.RequeueAfter)
+		}
+		if len(jb.calls) != 0 {
+			t.Error("expected no Build() calls for Suppressed phase")
+		}
+	})
+
+	t.Run("CompletedAt_set_within_TTL", func(t *testing.T) {
+		rjob := newRJob("test-rjob2", fp)
+		rjob.Status.Phase = v1alpha1.PhaseSuppressed
+		now := metav1.Now()
+		rjob.Status.CompletedAt = &now // just suppressed — well within TTL
+
+		c := newFakeClient(t, rjob)
+		jb := &fakeJobBuilder{}
+		r := newReconciler(t, c, jb, defaultCfg())
+
+		result, err := r.Reconcile(context.Background(), rjobReqFor("test-rjob2"))
+		if err != nil {
+			t.Errorf("expected nil error, got %v", err)
+		}
+		if result.RequeueAfter == 0 {
+			t.Error("expected non-zero RequeueAfter within TTL, got 0")
+		}
+		if len(jb.calls) != 0 {
+			t.Error("expected no Build() calls for Suppressed phase")
+		}
+	})
 }
 
 // correlationWindowCfg returns a config with a 30-second correlation window.

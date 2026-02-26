@@ -105,6 +105,9 @@ func TestCorrelator_FirstRuleMatches(t *testing.T) {
 	if group.GroupID == "" {
 		t.Error("expected non-empty GroupID")
 	}
+	if len(group.CorrelatedUIDs) == 0 {
+		t.Error("expected non-empty CorrelatedUIDs — regression: suppressCorrelatedPeers would suppress nobody")
+	}
 	if rule2.called {
 		t.Error("expected rule2 NOT to be called when rule1 already matched")
 	}

@@ -35,6 +35,9 @@ spec:
     - jsonPath: .status.prRef
       name: PR
       type: string
+    - jsonPath: .status.correlationGroupID
+      name: GroupID
+      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date

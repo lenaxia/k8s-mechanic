@@ -157,6 +157,9 @@ func main() {
 	}
 	if corr == nil {
 		logger.Info("multi-signal correlation disabled (DISABLE_CORRELATION=true)")
+	} else if cfg.CorrelationWindowSeconds == 0 {
+		logger.Info("multi-signal correlation active with no window hold (CORRELATION_WINDOW_SECONDS=0); " +
+			"set DISABLE_CORRELATION=true to skip correlation entirely")
 	}
 
 	if err := (&controller.RemediationJobReconciler{

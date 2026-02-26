@@ -22,6 +22,7 @@ implementation decisions.
 |--------|------|-------------|--------|
 | _(root)_ | 2026-02-20 | v1 — native K8s provider baseline, k8sgpt integration, RemediationJob CRD | Implemented |
 | [`0002_2026-02-25_multi-source-signal-architecture/`](0002_2026-02-25_multi-source-signal-architecture/) | 2026-02-25 | v2 — multi-source signal layer, AlertSource CRD, resource-level fingerprinting, cross-source priority dedup | Proposed |
+| [`0003_2026-02-26_proactive-engine/`](0003_2026-02-26_proactive-engine/) | 2026-02-26 | v3 — proactive audit engine, CheckBundle/AuditFinding/AuditSchedule/PersonaProfile CRDs, CEL check evaluation, maturity lifecycle, webhook delivery | Proposed |
 
 ---
 

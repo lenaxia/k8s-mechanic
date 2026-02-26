@@ -144,7 +144,6 @@ k8s-mendabot/
 │
 ├── api/
 │   └── v1alpha1/
-│       ├── result_types.go            # Vendored k8sgpt Result + Failure + Sensitive types
 │       └── remediationjob_types.go    # RemediationJob CRD types + deep copy + AddToScheme
 │
 ├── cmd/
@@ -152,19 +151,31 @@ k8s-mendabot/
 │       └── main.go                    # Scheme registration, provider loop, manager start
 │
 ├── internal/
+│   ├── cascade/
+│   │   └── cascade.go                 # Cascade suppression checker (node failure, namespace-wide)
+│   ├── circuitbreaker/
+│   │   └── circuitbreaker.go          # Self-remediation circuit breaker
 │   ├── config/
 │   │   ├── config.go                  # Config struct + FromEnv()
 │   │   └── config_test.go
+│   ├── correlator/
+│   │   ├── correlator.go              # Correlator + PVCPodRule + SameNamespaceParentRule + MultiPodSameNodeRule
+│   │   └── rules.go
 │   ├── domain/
 │   │   ├── interfaces.go              # JobBuilder interface
-│   │   └── provider.go                # SourceProvider interface + Finding + SourceRef types
+│   │   ├── provider.go                # SourceProvider interface + Finding + SourceRef types
+│   │   └── correlation.go             # CorrelationResult + CorrelationRule interface
+│   ├── metrics/
+│   │   └── metrics.go                 # Prometheus metrics registration
 │   ├── provider/
 │   │   ├── provider.go                # SourceProviderReconciler (generic, wraps any SourceProvider)
-│   │   └── k8sgpt/
-│   │       ├── provider.go            # K8sGPTProvider — implements SourceProvider
-│   │       ├── provider_test.go
-│   │       ├── reconciler.go          # ResultReconciler (concrete ctrl.Reconciler, internal detail)
-│   │       └── reconciler_test.go
+│   │   └── native/                    # Native Kubernetes providers (no k8sgpt dependency)
+│   │       ├── pod.go
+│   │       ├── deployment.go
+│   │       ├── pvc.go
+│   │       ├── node.go
+│   │       ├── statefulset.go
+│   │       └── job.go
 │   ├── controller/
 │   │   ├── remediationjob_controller.go
 │   │   ├── remediationjob_controller_test.go
@@ -172,6 +183,10 @@ k8s-mendabot/
 │   ├── jobbuilder/
 │   │   ├── job.go                     # Builder struct + Build() method
 │   │   └── job_test.go
+│   ├── readiness/
+│   │   ├── checker.go                 # Readiness checker interface + NopChecker + CachedChecker + All()
+│   │   ├── llm/                       # LLM readiness checkers (openai, bedrock, vertex)
+│   │   └── sink/                      # Sink readiness checkers (github)
 │   └── logging/
 │       └── logging.go                 # Zap logger construction
 │
@@ -196,7 +211,7 @@ k8s-mendabot/
 │       └── deployment-watcher.yaml
 │
 ├── docker/
-│   ├── Dockerfile.agent               # debian-slim + opencode + kubectl + k8sgpt + helm + gh
+│   ├── Dockerfile.agent               # debian-slim + opencode + kubectl + helm + flux + gh
 │   ├── Dockerfile.watcher             # multi-stage Go build → debian-slim runtime
 │   └── scripts/
 │       ├── get-github-app-token.sh    # Exchanges GitHub App private key for installation token
@@ -259,43 +274,37 @@ k8s-mendabot/
 ┌─────────────────────────────────────────────────────────────────────┐
 │  Kubernetes Cluster                                                  │
 │                                                                      │
-│  ┌──────────────────┐  writes   ┌──────────────────────────────┐   │
-│  │  k8sgpt-operator │ ────────▶ │  Result CRDs                 │   │
-│  │  (pre-existing)  │           │  (results.core.k8sgpt.ai)    │   │
-│  └──────────────────┘           └──────────────┬───────────────┘   │
-│                                                 │ watch             │
-│                                  ┌──────────────▼───────────────┐  │
-│                                  │  mendabot-watcher             │  │
-│                                  │  (Deployment)                 │  │
-│                                  │                               │  │
-│                                  │  SourceProviderReconciler     │  │
-│                                  │  + K8sGPTProvider             │  │
-│                                  │  - watches Result CRDs        │  │
-│                                  │  - creates RemediationJob CRDs│  │
-│                                  │                               │  │
-│                                  │  RemediationJobReconciler     │  │
-│                                  │  - watches RemediationJob CRDs│  │
-│                                  │  - creates batch/v1 Jobs      │  │
-│                                  │  - syncs Job status back      │  │
-│                                  └──────────────┬───────────────┘  │
-│                                                 │ creates           │
-│                              ┌──────────────────▼──────────────┐   │
-│                              │  RemediationJob CRDs            │   │
-│                              │  (remediation.mendabot.io)      │   │
-│                              │  - durable dedup state          │   │
-│                              │  - survives watcher restarts    │   │
-│                              └──────────────────┬──────────────┘   │
-│                                                 │ creates           │
-│                                  ┌──────────────▼───────────────┐  │
-│                                  │  mendabot-agent Job           │  │
-│                                  │  (one per unique finding)     │  │
-│                                  │                               │  │
-│                                  │  init: git clone GitOps repo  │  │
-│                                  │  main: opencode run <prompt>  │  │
-│                                  │    tools: kubectl (read-only) │  │
-│                                  │           k8sgpt analyze      │  │
-│                                  │           gh pr create        │  │
-│                                  └───────────────────────────────┘  │
+│  ┌──────────────────────────────────────────────────────────────┐   │
+│  │  mendabot-watcher (Deployment)                               │   │
+│  │                                                              │   │
+│  │  SourceProviderReconciler                                    │   │
+│  │  + NativeProviders (Pod, Deployment, StatefulSet,            │   │
+│  │    PVC, Node, Job)                                           │   │
+│  │  - watches core K8s resources directly                       │   │
+│  │  - creates RemediationJob CRDs                               │   │
+│  │                                                              │   │
+│  │  RemediationJobReconciler                                    │   │
+│  │  - watches RemediationJob CRDs                               │   │
+│  │  - creates batch/v1 Jobs                                     │   │
+│  │  - syncs Job status back                                     │   │
+│  └──────────────────────────┬───────────────────────────────────┘   │
+│                             │ creates                                │
+│              ┌──────────────▼──────────────┐                        │
+│              │  RemediationJob CRDs         │                        │
+│              │  (remediation.mendabot.io)   │                        │
+│              │  - durable dedup state       │                        │
+│              │  - survives watcher restarts │                        │
+│              └──────────────┬──────────────┘                        │
+│                             │ creates                                │
+│              ┌──────────────▼──────────────┐                        │
+│              │  mendabot-agent Job          │                        │
+│              │  (one per unique finding)    │                        │
+│              │                              │                        │
+│              │  init: git clone GitOps repo │                        │
+│              │  main: opencode run <prompt> │                        │
+│              │    tools: kubectl (read-only)│                        │
+│              │           gh pr create       │                        │
+│              └──────────────────────────────┘                        │
 └─────────────────────────────────────────────────────────────────────┘
                                           │
                                           ▼ opens PR

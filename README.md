@@ -121,7 +121,7 @@ exposed to the main agent container.
 
 For individual accounts visit here to create a new app with the above permissions: https://github.com/settings/apps/new
 
-Then visit https://github.com/settings/apps/<app-name>/installations and install it in your account and select your target repo
+Then visit `https://github.com/settings/apps/[app-name]/installations` and install it in your account and select your target repo
 
 ### 1. Create required Secrets
 

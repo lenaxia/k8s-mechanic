@@ -2,8 +2,8 @@ apiVersion: v2
 name: mendabot
 description: Kubernetes-native SRE remediation bot — watches cluster failures, spawns an LLM agent, and opens GitOps pull requests with proposed fixes.
 type: application
-version: 0.3.23
-appVersion: v0.3.23
+version: 0.3.25
+appVersion: v0.3.25
 kubeVersion: ">=1.28.0-0"
 keywords:
   - kubernetes
@@ -25,16 +25,14 @@ annotations:
     fingerprint: ""
     url: https://github.com/lenaxia.gpg
   artifacthub.io/changes: |
-    - kind: security
-      description: "Tool call output redaction wrappers (epic25) — all kubectl/helm/flux/gh output piped through domain.RedactSecrets before reaching LLM API (P-010 HIGH remediated)"
-    - kind: security
-      description: "Agent ClusterRole wildcard replaced with explicit resource enumeration, removing nodes/proxy access (P-004 HIGH remediated)"
-    - kind: security
-      description: "DetectInjection added to RemediationJobController dispatch path (P-008 MEDIUM remediated)"
-    - kind: security
-      description: "PEM key header and X-API-Key redaction patterns added"
-    - kind: fixed
-      description: "FINDING_FINGERPRINT truncated to 12 chars to prevent base64 redaction false positive"
+    - kind: added
+      description: "Auto-close resolved findings (epic26) — watcher closes GitHub PRs via REST API when the underlying Kubernetes issue self-heals"
+    - kind: added
+      description: "GitHub App token provider in watcher (55-min cache, RS256 JWT exchange)"
+    - kind: added
+      description: "SinkRef status field on RemediationJob — structured PR/issue reference used by auto-close"
+    - kind: added
+      description: "Agent STEP 9 — writes SinkRef back to RemediationJob status after opening a PR"
   artifacthub.io/containsSecurityUpdates: "true"
   artifacthub.io/recommendations: |
     - url: https://artifacthub.io/packages/helm/cert-manager/cert-manager

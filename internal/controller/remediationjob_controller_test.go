@@ -1897,37 +1897,34 @@ func TestCorrelationWindow_NonPrimary_RequeuesAndStaysPending(t *testing.T) {
 	}
 }
 
-// TestCorrelationWindow_NonPrimary_PrimaryDispatched_FallsBackToSolo verifies the
-// primaryGone deadline guard: when the non-primary's primary is PhaseDispatched
-// (successfully completed its own window + dispatch — no longer in pendingPeers),
-// and the non-primary has been alive long enough (> gracePeriod+window), the
-// non-primary must fall through to solo dispatch rather than looping forever.
+// TestCorrelationWindow_NonPrimary_PrimaryDispatched_SuppressesSelf verifies that
+// when the correlator identifies a non-primary whose primary peer is already in
+// PhaseDispatched, the non-primary transitions itself to PhaseSuppressed using
+// the primary's CorrelationGroupID rather than looping with a 5s requeue.
 //
-// This catches the bug where primaryGone checked peers (Pending-only) and would
-// incorrectly treat a Dispatched primary as "gone", eventually causing the non-primary
-// to self-dispatch as a solo job even when the primary is alive and healthy.
-//
-// Correct behavior: only fall through when the primary is truly absent from the
-// cluster in ALL phases, not merely absent from the Pending set.
-func TestCorrelationWindow_NonPrimary_PrimaryDispatched_FallsBackToSolo(t *testing.T) {
+// This is the core regression test for the "pod dispatches solo" bug: previously
+// correlationPeers() only returned Pending jobs, so a Dispatched primary was
+// invisible to the correlator, causing the non-primary to eventually solo-dispatch.
+// With the fix, correlationPeers() includes Dispatched/Running peers, the correlator
+// sees the match, and the non-primary suppresses itself immediately.
+func TestCorrelationWindow_NonPrimary_PrimaryDispatched_SuppressesSelf(t *testing.T) {
 	const fp = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
 	const fp2 = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+	const primaryGroupID = "grp-dispatched-test"
 
-	// Non-primary: old enough that waitedLongEnough=true.
-	// correlationWindowCfg gives window=30s, gracePeriod=3×30=90s → threshold=120s.
-	// Use 60s age here; this job is NOT old enough to fall through (primaryGone=false
-	// because the primary is Dispatched and still in the cluster).
+	// Non-primary: window already elapsed (60s old, window=30s).
 	secondary := newRJobCreatedAt("np-dispatched-secondary", fp, time.Now().Add(-60*time.Second))
 	secondary.UID = "uid-np-dispatched-secondary"
 	secondary.Status.Phase = v1alpha1.PhasePending
 	secondary.Spec.Finding = v1alpha1.FindingSpec{Kind: "Pod", Name: "pod-np", Namespace: testNamespace}
 
-	// Primary: DISPATCHED (not Pending — absent from pendingPeers). The non-primary
-	// must NOT treat this as "primary gone". Under the fixed code, the primary is found
-	// in the all-phases list → primaryGone=false → still requeues 5s.
+	// Primary: already DISPATCHED with a CorrelationGroupID set.
+	// With the fix, correlationPeers() returns this job and the correlator matches.
+	// The non-primary path detects PhaseDispatched and suppresses self.
 	dispatchedPrimary := newRJobCreatedAt("np-dispatched-primary", fp2, time.Now().Add(-60*time.Second))
 	dispatchedPrimary.UID = "uid-np-dispatched-primary"
-	dispatchedPrimary.Status.Phase = v1alpha1.PhaseDispatched // NOT Pending
+	dispatchedPrimary.Status.Phase = v1alpha1.PhaseDispatched
+	dispatchedPrimary.Status.CorrelationGroupID = primaryGroupID
 
 	c := newFakeClient(t, secondary, dispatchedPrimary)
 
@@ -1936,30 +1933,39 @@ func TestCorrelationWindow_NonPrimary_PrimaryDispatched_FallsBackToSolo(t *testi
 	// The correlator returns a match pointing at the Dispatched primary.
 	matchResult := domain.CorrelationResult{
 		Matched:    true,
-		GroupID:    "grp-dispatched-test",
+		GroupID:    primaryGroupID,
 		PrimaryUID: "uid-np-dispatched-primary",
 		Reason:     "test-match",
 	}
 	rule := fakeCorrelatorRule{name: "test-rule", result: matchResult}
 	corr := &correlator.Correlator{Rules: []domain.CorrelationRule{rule}}
-	// window=30s (from correlationWindowCfg); secondary is 60s old so the hold is already elapsed.
-	cfg := correlationWindowCfg()
+	cfg := correlationWindowCfg() // window=30s
 	r := newReconcilerWithCorrelator(t, c, jb, cfg, corr)
 
 	result, err := r.Reconcile(context.Background(), rjobReqFor("np-dispatched-secondary"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// Primary is Dispatched but still present in the cluster → primaryGone=false.
-	// Non-primary must still requeue 5s (not fall through to solo dispatch).
-	if result.RequeueAfter != 5*time.Second {
-		t.Errorf("expected RequeueAfter=5s when primary is Dispatched (not truly gone), got %v", result.RequeueAfter)
+	// Non-primary must suppress itself, not requeue.
+	if result.RequeueAfter != 0 {
+		t.Errorf("expected RequeueAfter=0 (suppressed, no requeue), got %v", result.RequeueAfter)
 	}
 	if len(jb.calls) != 0 {
-		t.Errorf("expected no Build() calls when primary is Dispatched, got %d", len(jb.calls))
+		t.Errorf("expected no Build() calls when self-suppressing under dispatched primary, got %d", len(jb.calls))
+	}
+	// Verify the secondary transitioned to PhaseSuppressed with the primary's group ID.
+	var updated v1alpha1.RemediationJob
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: testNamespace, Name: "np-dispatched-secondary"}, &updated); err != nil {
+		t.Fatalf("could not fetch updated secondary: %v", err)
+	}
+	if updated.Status.Phase != v1alpha1.PhaseSuppressed {
+		t.Errorf("expected secondary Phase=PhaseSuppressed, got %v", updated.Status.Phase)
+	}
+	if updated.Status.CorrelationGroupID != primaryGroupID {
+		t.Errorf("expected CorrelationGroupID=%q, got %q", primaryGroupID, updated.Status.CorrelationGroupID)
 	}
 
-	// Now test the TRUE primaryGone case: primary is absent entirely from the cluster.
+	// Sub-case: primary is truly gone from the cluster entirely (not just non-Pending).
 	// Non-primary must fall through to solo dispatch when waitedLongEnough=true.
 	// With window=30s and gracePeriod=3×30=90s, threshold is gracePeriod+window=120s.
 	// Create the job 200s ago so time.Since(CT) > 120s → waitedLongEnough=true.
@@ -1985,8 +1991,7 @@ func TestCorrelationWindow_NonPrimary_PrimaryDispatched_FallsBackToSolo(t *testi
 	if err != nil {
 		t.Fatalf("unexpected error on truly-gone primary test: %v", err)
 	}
-	// Primary is truly gone and waitedLongEnough=true (window=0, gracePeriod=0, job is 60s old).
-	// Non-primary must fall through to solo dispatch.
+	// Primary is truly gone and waitedLongEnough=true → solo dispatch.
 	if result2.RequeueAfter != 0 {
 		t.Errorf("expected RequeueAfter=0 (solo dispatch) when primary is truly gone, got %v", result2.RequeueAfter)
 	}
@@ -1995,10 +2000,106 @@ func TestCorrelationWindow_NonPrimary_PrimaryDispatched_FallsBackToSolo(t *testi
 	}
 }
 
+// TestCorrelationBug_PodDispatchesSolo_RegressionTest is the end-to-end regression
+// test for the proven "pod dispatches solo" bug in Epic 13 multi-signal correlation.
+//
+// Scenario (mirrors the observed production failure):
+//
+//  1. Deployment finding arrives → Deployment rjob created (PhasePending).
+//     Its correlation window elapses, the correlator matches the pod peer, the
+//     Deployment dispatches as primary and the pod rjob is suppressed. ✓ (happy path)
+//
+//  2. FAILURE SCENARIO (what this test covers): The pod rjob's window elapses AFTER
+//     the Deployment rjob has already transitioned to PhaseDispatched.
+//     Old code: correlationPeers() only returned PhasePending jobs → Dispatched
+//     primary was invisible → correlator saw no peers → pod solo-dispatched. ✗
+//     Fixed code: correlationPeers() includes PhaseDispatched → correlator matches →
+//     non-primary path detects primary is Dispatched → pod suppresses self. ✓
+//
+// This test asserts the fixed behaviour: the pod rjob transitions to PhaseSuppressed
+// with the deployment's CorrelationGroupID, and no batch/v1 Job is built.
+func TestCorrelationBug_PodDispatchesSolo_RegressionTest(t *testing.T) {
+	const deployFP = "1111111111111111111111111111111111111111111111111111111111111111"
+	const podFP = "2222222222222222222222222222222222222222222222222222222222222222"
+	const groupID = "grp-deploy-pod-regression"
+
+	// Deployment rjob: already dispatched (it won the primary role and dispatched
+	// its batch/v1 Job). Has CorrelationGroupID set.
+	deployRJob := newRJobCreatedAt("deploy-rjob", deployFP, time.Now().Add(-130*time.Second))
+	deployRJob.UID = "uid-deploy-rjob"
+	deployRJob.Status.Phase = v1alpha1.PhaseDispatched
+	deployRJob.Status.CorrelationGroupID = groupID
+	deployRJob.Spec.Finding = v1alpha1.FindingSpec{
+		Kind:      "Deployment",
+		Name:      "test-crashloop",
+		Namespace: testNamespace,
+	}
+	if deployRJob.Labels == nil {
+		deployRJob.Labels = make(map[string]string)
+	}
+	deployRJob.Labels[domain.CorrelationGroupIDLabel] = groupID
+	deployRJob.Labels[domain.CorrelationGroupRoleLabel] = domain.CorrelationRolePrimary
+	deployRJob.Labels["app.kubernetes.io/managed-by"] = "mendabot-watcher"
+
+	// Pod rjob: PhasePending, window just elapsed, arrives after Deployment was dispatched.
+	// This is the job under test — it should suppress itself, NOT solo-dispatch.
+	podRJob := newRJobCreatedAt("pod-rjob", podFP, time.Now().Add(-35*time.Second))
+	podRJob.UID = "uid-pod-rjob"
+	podRJob.Status.Phase = v1alpha1.PhasePending
+	podRJob.Spec.Finding = v1alpha1.FindingSpec{
+		Kind:      "Pod",
+		Name:      "test-crashloop-abc123",
+		Namespace: testNamespace,
+	}
+
+	c := newFakeClient(t, deployRJob, podRJob)
+	job := defaultFakeJob(podRJob)
+	jb := &fakeJobBuilder{returnJob: job}
+
+	// Correlator: matches pod → deployment (PrimaryUID = deployment's UID).
+	matchResult := domain.CorrelationResult{
+		Matched:    true,
+		GroupID:    groupID,
+		PrimaryUID: "uid-deploy-rjob",
+		Reason:     "SameNamespaceParentRule",
+	}
+	rule := fakeCorrelatorRule{name: "SameNamespaceParentRule", result: matchResult}
+	corr := &correlator.Correlator{Rules: []domain.CorrelationRule{rule}}
+	// window=30s; pod rjob is 35s old → window elapsed.
+	cfg := correlationWindowCfg()
+	r := newReconcilerWithCorrelator(t, c, jb, cfg, corr)
+
+	result, err := r.Reconcile(context.Background(), rjobReqFor("pod-rjob"))
+	if err != nil {
+		t.Fatalf("Reconcile returned unexpected error: %v", err)
+	}
+
+	// Must NOT dispatch solo.
+	if len(jb.calls) != 0 {
+		t.Errorf("regression: pod rjob built a batch/v1 Job (solo dispatch) — expected self-suppression; got %d Build() call(s)", len(jb.calls))
+	}
+	// Must not requeue (suppressed is terminal).
+	if result.RequeueAfter != 0 {
+		t.Errorf("expected RequeueAfter=0 after self-suppression, got %v", result.RequeueAfter)
+	}
+
+	// Pod rjob must be PhaseSuppressed with the deployment's group ID.
+	var updatedPod v1alpha1.RemediationJob
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: testNamespace, Name: "pod-rjob"}, &updatedPod); err != nil {
+		t.Fatalf("could not fetch updated pod rjob: %v", err)
+	}
+	if updatedPod.Status.Phase != v1alpha1.PhaseSuppressed {
+		t.Errorf("regression: expected pod rjob Phase=PhaseSuppressed, got %v", updatedPod.Status.Phase)
+	}
+	if updatedPod.Status.CorrelationGroupID != groupID {
+		t.Errorf("regression: expected pod rjob CorrelationGroupID=%q, got %q", groupID, updatedPod.Status.CorrelationGroupID)
+	}
+}
+
 // TestCorrelationWindow_Primary_SuppressesPeersBeforeDispatch verifies that when
 // the correlator matches and this job IS the primary, it suppresses all correlated
 // peers (whose UIDs appear in group.CorrelatedUIDs) before dispatching. This ensures
-// peers are visible to pendingPeers during the suppression step and not dispatched
+// peers are visible to correlationPeers during the suppression step and not dispatched
 // independently.
 func TestCorrelationWindow_Primary_SuppressesPeersBeforeDispatch(t *testing.T) {
 	const fp = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"

@@ -343,7 +343,7 @@ func (r *RemediationJobReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 				return ctrl.Result{RequeueAfter: window - age}, nil
 			}
 		}
-		peers, peersErr := r.pendingPeers(ctx, &rjob)
+		peers, peersErr := r.correlationPeers(ctx, &rjob)
 		if peersErr != nil {
 			return ctrl.Result{}, fmt.Errorf("listing pending peers: %w", peersErr)
 		}
@@ -353,24 +353,56 @@ func (r *RemediationJobReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 		if found {
 			if group.PrimaryUID != rjob.UID {
-				// Check whether the designated primary still exists. We need only the
-				// existence flag — we do not use the primary's content, so avoid
-				// storing it in a variable that would mislead future readers.
-				primaryGone := true
+				// Look up the primary across ALL phases (not just Pending), capturing
+				// its object so we can read its phase and CorrelationGroupID.
+				var primaryJob *v1alpha1.RemediationJob
 				var allInNS v1alpha1.RemediationJobList
 				if listErr := r.List(ctx, &allInNS,
 					client.InNamespace(r.Cfg.AgentNamespace),
 					client.MatchingLabels{"app.kubernetes.io/managed-by": "mendabot-watcher"},
 				); listErr != nil {
 					return ctrl.Result{}, fmt.Errorf("listing all jobs to check primary liveness: %w", listErr)
-				} else {
-					for i := range allInNS.Items {
-						if allInNS.Items[i].UID == group.PrimaryUID {
-							primaryGone = false
-							break
-						}
+				}
+				for i := range allInNS.Items {
+					if allInNS.Items[i].UID == group.PrimaryUID {
+						primaryJob = &allInNS.Items[i]
+						break
 					}
 				}
+
+				// If the primary is already Dispatched or Running, suppress self
+				// immediately. This is the key fix for the late-arriving non-primary
+				// bug: previously correlationPeers() only returned Pending jobs, so
+				// a Dispatched primary was invisible to the correlator and the
+				// non-primary would eventually solo-dispatch.
+				if primaryJob != nil &&
+					(primaryJob.Status.Phase == v1alpha1.PhaseDispatched ||
+						primaryJob.Status.Phase == v1alpha1.PhaseRunning) {
+					// Prefer the primary's own CorrelationGroupID; fall back to the
+					// group ID the correlator computed (from the primary's label).
+					groupID := primaryJob.Status.CorrelationGroupID
+					if groupID == "" {
+						groupID = primaryJob.Labels[domain.CorrelationGroupIDLabel]
+					}
+					if groupID == "" {
+						groupID = group.GroupID
+					}
+					if r.Log != nil {
+						r.Log.Info("correlation: primary already dispatched; suppressing self",
+							zap.String("remediationJob", rjob.Name),
+							zap.String("primaryUID", string(group.PrimaryUID)),
+							zap.String("groupID", groupID),
+						)
+					}
+					if err := r.transitionSuppressed(ctx, &rjob, groupID, group.PrimaryUID); err != nil {
+						return ctrl.Result{}, fmt.Errorf("suppressing self under dispatched primary: %w", err)
+					}
+					return ctrl.Result{}, nil
+				}
+
+				// Primary is not yet dispatched — either it is still Pending/unknown,
+				// or it has already gone terminal (Succeeded/Failed/gone from cluster).
+				primaryGone := primaryJob == nil
 				// Use a minimum grace period of 10 s so that window==0 configurations
 				// still give the primary a chance to reconcile before the non-primary
 				// falls back to solo dispatch.
@@ -395,9 +427,8 @@ func (r *RemediationJobReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 						return res, nil
 					}
 					return r.callDispatch(ctx, &rjob, nil)
-				} else {
-					return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 				}
+				return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 			}
 
 			if group.PrimaryUID == rjob.UID {
@@ -569,16 +600,22 @@ func syncPhaseFromJob(job *batchv1.Job) v1alpha1.RemediationJobPhase {
 	return v1alpha1.PhaseDispatched
 }
 
-// pendingPeers lists all Pending RemediationJob objects in AgentNamespace,
-// excluding the candidate itself. Returns an error if the API server is unavailable
-// so the caller can requeue rather than silently treating the cluster as having zero peers.
-// The managed-by label selector restricts the list to mendabot-owned objects, preventing
-// O(N) full-namespace scans from amplifying into O(N²) API-server load on every reconcile.
+// correlationPeers lists all RemediationJob objects in AgentNamespace that are
+// eligible to participate in correlation with the candidate, excluding the candidate
+// itself. Eligible phases are Pending, Dispatched, and Running — this allows the
+// correlator to recognise a peer that has already been dispatched as the primary,
+// so that a late-arriving non-primary can suppress itself rather than racing to
+// dispatch independently.
+//
+// Returns an error if the API server is unavailable so the caller can requeue
+// rather than silently treating the cluster as having zero peers.
+// The managed-by label selector restricts the list to mendabot-owned objects,
+// preventing O(N) full-namespace scans from amplifying into O(N²) API-server load.
 //
 // Contract: this function only returns jobs that carry app.kubernetes.io/managed-by=mendabot-watcher.
 // RemediationJobs created without this label (e.g. manually) are invisible to correlation.
 // SourceProviderReconciler always sets this label at creation time — see provider.go.
-func (r *RemediationJobReconciler) pendingPeers(ctx context.Context, candidate *v1alpha1.RemediationJob) ([]*v1alpha1.RemediationJob, error) {
+func (r *RemediationJobReconciler) correlationPeers(ctx context.Context, candidate *v1alpha1.RemediationJob) ([]*v1alpha1.RemediationJob, error) {
 	var list v1alpha1.RemediationJobList
 	if err := r.List(ctx, &list,
 		client.InNamespace(r.Cfg.AgentNamespace),
@@ -592,7 +629,13 @@ func (r *RemediationJobReconciler) pendingPeers(ctx context.Context, candidate *
 		if p.UID == candidate.UID {
 			continue
 		}
-		if p.Status.Phase != v1alpha1.PhasePending {
+		// Include Pending, Dispatched, and Running peers. Suppressed, Succeeded,
+		// and Failed jobs are excluded — they are terminal and should not affect
+		// correlation decisions for newly-arriving findings.
+		switch p.Status.Phase {
+		case v1alpha1.PhasePending, v1alpha1.PhaseDispatched, v1alpha1.PhaseRunning:
+			// eligible
+		default:
 			continue
 		}
 		peers = append(peers, p)

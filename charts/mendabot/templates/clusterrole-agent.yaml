@@ -16,6 +16,9 @@ rules:
   resources: ["jobs", "cronjobs"]
   verbs: ["get", "list", "watch"]
 - apiGroups: ["remediation.mendabot.io"]
-  resources: ["remediationjobs", "remediationjobs/status"]
+  resources: ["remediationjobs"]
   verbs: ["get", "list", "watch"]
+- apiGroups: ["remediation.mendabot.io"]
+  resources: ["remediationjobs/status"]
+  verbs: ["get", "patch"]
 {{- end }}

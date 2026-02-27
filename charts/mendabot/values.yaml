@@ -62,6 +62,9 @@ watcher:
   # -- Minimum number of pods failing on the same node to trigger MultiPodSameNodeRule.
   #    Default is 3.
   multiPodThreshold: 3
+  # -- Automatically close open GitHub PRs/issues when the underlying finding resolves.
+  #    Set to false to disable auto-close and leave PRs open for manual review.
+  prAutoClose: true
 
 # -- Self-remediation configuration.
 selfRemediation:

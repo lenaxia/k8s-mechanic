@@ -96,6 +96,11 @@ spec:
           value: {{ .Values.selfRemediation.cascadeNamespaceThreshold | quote }}
         - name: CASCADE_NODE_CACHE_TTL_SECONDS
           value: {{ .Values.selfRemediation.cascadeNodeCacheTTLSeconds | quote }}
+        - name: PR_AUTO_CLOSE
+          value: {{ .Values.watcher.prAutoClose | quote }}
+        envFrom:
+        - secretRef:
+            name: mendabot-github-app
         ports:
         - name: metrics
           containerPort: 8080

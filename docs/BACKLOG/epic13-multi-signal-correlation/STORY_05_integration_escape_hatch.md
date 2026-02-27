@@ -30,25 +30,25 @@ production and need an immediate rollback without re-deploying a different binar
 
 ## Acceptance Criteria
 
-- [ ] Integration tests for correlation exist in `internal/controller/` (either extending
-      `suite_test.go` or in a new `correlation_integration_test.go` in the same package):
+- [x] Integration tests for correlation exist in `internal/controller/`:
   - **TC-01 — No correlation, single finding:** one `RemediationJob` created, window
     elapses, job dispatched without `CorrelationGroupID`
   - **TC-02 — SameNamespaceParent correlation:** two jobs with matching parent prefix
     created, window elapses, candidate that is primary suppresses peer and dispatches
     with group label; peer transitions to `Suppressed`
   - **TC-03 — PVCPod correlation:** PVC finding + Pod finding in same namespace with
-    matching volume reference, window elapses, PVC job is primary, Pod job `Suppressed`.
-    Note: `AllFindings` will contain exactly one entry (the pod's finding); no sort is
-    needed for two-job groups, but use sorted comparison if the group size can vary.
+    matching volume reference, window elapses, PVC job is primary, Pod job `Suppressed`
   - **TC-04 — No correlation across namespaces:** two jobs with identical parent names
     but different namespaces, each dispatched independently (no group)
   - **TC-05 — DISABLE_CORRELATION=true:** two correlated jobs, escape hatch enabled,
     both dispatched immediately without any hold or grouping
-- [ ] `DISABLE_CORRELATION=true` skips the window requeue and calls no correlator code
-- [ ] `go test -timeout 60s -race ./internal/controller/...` passes (60s timeout because
-      tests use a 1s window and need margin for the two-reconcile pattern)
-- [ ] `go test -timeout 30s -race ./...` passes for all non-envtest packages
+  - **TC-06 — Non-primary self-suppresses when primary is already Dispatched (v0.3.24
+    regression):** primary in `PhaseDispatched` with `CorrelationGroupID` set; non-primary
+    reconciles after its own window; non-primary transitions to `PhaseSuppressed` with the
+    primary's group ID; no batch/v1 Job built
+- [x] `DISABLE_CORRELATION=true` skips the window requeue and calls no correlator code
+- [x] `go test -timeout 60s -race ./internal/controller/...` passes
+- [x] `go test -timeout 30s -race ./...` passes for all non-envtest packages
 
 ---
 
@@ -101,7 +101,10 @@ require.Equal(t, updatedPrimary.Labels[domain.CorrelationGroupIDLabel],
 ```
 
 For the non-primary candidate case (TC-02 variant), test that the non-primary's first
-post-window reconcile returns `RequeueAfter: 5s` and the job stays Pending:
+post-window reconcile returns `RequeueAfter: 5s` and the job stays Pending **when the
+primary is still Pending**. When the primary is already `PhaseDispatched`, the non-primary
+must suppress itself immediately (see `TestCorrelationBug_PodDispatchesSolo_RegressionTest`
+and `TestCorrelationWindow_NonPrimary_PrimaryDispatched_SuppressesSelf`):
 
 ```go
 // Non-primary candidate's post-window reconcile returns RequeueAfter
@@ -164,19 +167,18 @@ test file noting this:
 
 ## Tasks
 
-- [ ] Extend `internal/controller/suite_test.go` or create
-      `internal/controller/correlation_integration_test.go` with TC-01 through TC-05
-      using the two-call `Reconcile()` pattern described above
-- [ ] Include a non-primary-requeues test case in TC-02 to verify the requeue path
+- [x] Extend `internal/controller/` tests with TC-01 through TC-05 using the two-call
+      `Reconcile()` pattern described above
+- [x] Include a non-primary-requeues test case in TC-02 to verify the requeue path
       (not just the primary-dispatches path)
-- [ ] Verify via test (no code change) that `SourceProviderReconciler` already skips
-      `Suppressed`-phase jobs via the `default:` case at `provider.go:383`; add a
-      comment explaining this
-- [ ] Confirm `testdata/crds/remediationjob_crd.yaml` has been updated by STORY_00
-      (if STORY_00 is not yet complete, this story cannot proceed)
-- [ ] Run `go test -timeout 60s -race ./internal/controller/...` — must pass
-- [ ] Run `go test -timeout 30s -race ./...` for all other packages — must pass
-- [ ] Run `go build ./...` and `go vet ./...` — must be clean
+- [x] Add regression test TC-06 for non-primary self-suppression under dispatched primary
+      (`TestCorrelationBug_PodDispatchesSolo_RegressionTest`)
+- [x] Verify via test (no code change) that `SourceProviderReconciler` already skips
+      `Suppressed`-phase jobs via the `default:` case; add a comment explaining this
+- [x] Confirm `testdata/crds/remediationjob_crd.yaml` has been updated by STORY_00
+- [x] Run `go test -timeout 60s -race ./internal/controller/...` — must pass
+- [x] Run `go test -timeout 30s -race ./...` for all other packages — must pass
+- [x] Run `go build ./...` and `go vet ./...` — must be clean
 
 ---
 
@@ -189,10 +191,11 @@ test file noting this:
 
 ## Definition of Done
 
-- [ ] All five test cases pass in envtest
-- [ ] Non-primary requeue path tested explicitly
-- [ ] `DISABLE_CORRELATION=true` verified to bypass all correlation logic
-- [ ] `Suppressed` phase treated correctly by `SourceProviderReconciler` (verified by test)
-- [ ] Full repository test suite passes: `go test -timeout 60s -race ./...`
-- [ ] `go build ./...` and `go vet ./...` clean
-- [ ] Worklog entry written in `docs/WORKLOGS/`
+- [x] All test cases pass (TC-01 through TC-06)
+- [x] Non-primary requeue path tested explicitly (primary still Pending)
+- [x] Non-primary self-suppression tested explicitly (primary already Dispatched — v0.3.24)
+- [x] `DISABLE_CORRELATION=true` verified to bypass all correlation logic
+- [x] `Suppressed` phase treated correctly by `SourceProviderReconciler` (verified by test)
+- [x] Full repository test suite passes: `go test -timeout 60s -race ./...`
+- [x] `go build ./...` and `go vet ./...` clean
+- [x] Worklog entry written in `docs/WORKLOGS/`

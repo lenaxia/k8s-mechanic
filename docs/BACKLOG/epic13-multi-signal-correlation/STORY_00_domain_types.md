@@ -26,36 +26,23 @@ are the foundation for every subsequent story in this epic.
 
 ## Acceptance Criteria
 
-- [ ] `internal/domain/correlation.go` exists with:
+- [x] `internal/domain/correlation.go` exists with:
   - `CorrelationRule` interface with method `Evaluate(ctx context.Context, candidate *v1alpha1.RemediationJob, peers []*v1alpha1.RemediationJob, c client.Client) (CorrelationResult, error)`
   - `CorrelationResult` struct: `Matched bool`, `GroupID string`, `PrimaryUID types.UID`, `Reason string`
   - `NewCorrelationGroupID() string` — generates a stable 12-char hex ID from 6 random bytes
   - `CorrelationGroupIDLabel = "mendabot.io/correlation-group-id"` constant
   - `CorrelationGroupRoleLabel = "mendabot.io/correlation-role"` constant (values: `"primary"`, `"correlated"`)
   - `CorrelationRolePrimary = "primary"` and `CorrelationRoleCorrelated = "correlated"` constants
-- [ ] `api/v1alpha1/remediationjob_types.go` gains:
-  - `PhaseSuppressed RemediationJobPhase = "Suppressed"` constant — add after
-    `PhasePermanentlyFailed` at line 75 (which is itself after `PhaseCancelled` at line 70)
-  - `CorrelationGroupID string` field in `RemediationJobStatus` — add after the
-    `Conditions` field at line 217
-  - The `+kubebuilder:validation:Enum` marker at line 187 currently reads:
-    `// +kubebuilder:validation:Enum=Pending;Dispatched;Running;Succeeded;Failed;Cancelled;PermanentlyFailed`
-    It must be updated to add `Suppressed`:
-    `// +kubebuilder:validation:Enum=Pending;Dispatched;Running;Succeeded;Failed;Cancelled;PermanentlyFailed;Suppressed`
-    Without this, the API server will reject any status patch that sets `Phase=Suppressed`.
-  - `ConditionCorrelationSuppressed = "CorrelationSuppressed"` constant — add after
-    `ConditionPermanentlyFailed` at line 91
-  - `testdata/crds/remediationjob_crd.yaml` must be updated: add `- Suppressed` to the
-    `enum:` list under `spec.versions[0].schema.openAPIV3Schema.properties.status.properties.phase`
-    (currently ends with `- PermanentlyFailed` at line 280); and add
-    `correlationGroupID: {type: string}` to the `status.properties` block after `completedAt`
-- [ ] `DeepCopyInto` in `remediationjob_types.go` (at line 242) must explicitly copy
-      `CorrelationGroupID`. There is no `zz_generated_deepcopy.go` — deep copy is manual.
-      Add `out.Status.CorrelationGroupID = in.Status.CorrelationGroupID` immediately after
-      `out.Status.RetryCount = in.Status.RetryCount` at line 252.
-- [ ] `internal/domain/correlation_test.go` tests `NewCorrelationGroupID()` for uniqueness
+- [x] `api/v1alpha1/remediationjob_types.go` gains:
+  - `PhaseSuppressed RemediationJobPhase = "Suppressed"` constant
+  - `CorrelationGroupID string` field in `RemediationJobStatus`
+  - `+kubebuilder:validation:Enum` marker updated to include `Suppressed`
+  - `ConditionCorrelationSuppressed = "CorrelationSuppressed"` constant
+  - `testdata/crds/remediationjob_crd.yaml` updated with `Suppressed` enum and `correlationGroupID` field
+- [x] `DeepCopyInto` explicitly copies `CorrelationGroupID`
+- [x] `internal/domain/correlation_test.go` tests `NewCorrelationGroupID()` for uniqueness
       and correct length (12 hex chars)
-- [ ] `go test -timeout 30s -race ./internal/domain/... ./api/...` passes
+- [x] `go test -timeout 30s -race ./internal/domain/... ./api/...` passes
 
 ---
 
@@ -163,18 +150,15 @@ out.Status.CorrelationGroupID = in.Status.CorrelationGroupID
 
 ## Tasks
 
-- [ ] Write `internal/domain/correlation_test.go` (TDD — must fail first)
-- [ ] Write `internal/domain/correlation.go` (interface + types + ID generator)
-- [ ] Add `PhaseSuppressed` constant after `PhasePermanentlyFailed` (line 75)
-- [ ] Add `ConditionCorrelationSuppressed` constant after `ConditionPermanentlyFailed` (line 91)
-- [ ] Update the `+kubebuilder:validation:Enum` marker at line 187 to include `Suppressed`
-- [ ] Add `CorrelationGroupID string` field to `RemediationJobStatus` after `Conditions` (line 217)
-- [ ] Add `out.Status.CorrelationGroupID = in.Status.CorrelationGroupID` to `DeepCopyInto`
-      immediately after `out.Status.RetryCount = in.Status.RetryCount` (line 252)
-- [ ] Update `testdata/crds/remediationjob_crd.yaml`:
-  - Add `- Suppressed` to the `enum:` list under `status.properties.phase` (after `- PermanentlyFailed` at line 280)
-  - Add `correlationGroupID: {type: string}` to the `status.properties` block
-- [ ] Run `go test -timeout 30s -race ./internal/domain/... ./api/...` — must pass
+- [x] Write `internal/domain/correlation_test.go` (TDD — must fail first)
+- [x] Write `internal/domain/correlation.go` (interface + types + ID generator)
+- [x] Add `PhaseSuppressed` constant after `PhasePermanentlyFailed`
+- [x] Add `ConditionCorrelationSuppressed` constant after `ConditionPermanentlyFailed`
+- [x] Update the `+kubebuilder:validation:Enum` marker to include `Suppressed`
+- [x] Add `CorrelationGroupID string` field to `RemediationJobStatus`
+- [x] Add `out.Status.CorrelationGroupID = in.Status.CorrelationGroupID` to `DeepCopyInto`
+- [x] Update `testdata/crds/remediationjob_crd.yaml`
+- [x] Run `go test -timeout 30s -race ./internal/domain/... ./api/...` — must pass
 
 ---
 
@@ -187,10 +171,10 @@ out.Status.CorrelationGroupID = in.Status.CorrelationGroupID
 
 ## Definition of Done
 
-- [ ] `CorrelationRule` interface and all supporting types exist and compile
-- [ ] `PhaseSuppressed` is a valid `RemediationJobPhase` constant accepted by the API server
+- [x] `CorrelationRule` interface and all supporting types exist and compile
+- [x] `PhaseSuppressed` is a valid `RemediationJobPhase` constant accepted by the API server
       (enum marker updated + CRD YAML updated)
-- [ ] `ConditionCorrelationSuppressed` constant exists
-- [ ] `DeepCopyInto` explicitly copies `CorrelationGroupID`
-- [ ] `testdata/crds/remediationjob_crd.yaml` reflects the new enum value and field
-- [ ] All tests pass
+- [x] `ConditionCorrelationSuppressed` constant exists
+- [x] `DeepCopyInto` explicitly copies `CorrelationGroupID`
+- [x] `testdata/crds/remediationjob_crd.yaml` reflects the new enum value and field
+- [x] All tests pass

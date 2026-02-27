@@ -32,17 +32,15 @@ This is a prompt-only change. Zero Go code.
 
 ## Acceptance Criteria
 
-- [ ] `charts/mendabot/files/prompts/core.txt` has a new `=== CORRELATED GROUP ===` section
-      added immediately after the `AI analysis` block (after line 22, before `=== ENVIRONMENT ===`)
+- [x] `charts/mendabot/files/prompts/core.txt` has a new `=== CORRELATED GROUP ===` section
+      added immediately after the `AI analysis` block, before `=== ENVIRONMENT ===`
       referencing `${FINDING_CORRELATED_FINDINGS}` and `${FINDING_CORRELATION_GROUP_ID}`
-- [ ] The prompt instructs the agent that if `FINDING_CORRELATED_FINDINGS` is non-empty, the
+- [x] The prompt instructs the agent that if `FINDING_CORRELATED_FINDINGS` is non-empty, the
       investigation must explain all findings in the group, not just the primary
-- [ ] The `=== PR BODY FORMAT ===` section gains a `## Correlated Findings` entry rendered
+- [x] The `=== PR BODY FORMAT ===` section gains a `## Correlated Findings` entry rendered
       only when `FINDING_CORRELATION_GROUP_ID` is non-empty
-- [ ] A new **HARD RULE 11** is added — the existing rules are numbered 1, 2, 3, 4, 5, 6, 7,
-      9, 10 (rule 8 is intentionally absent in the current prompt); the next sequential
-      unused number after 10 is 11
-- [ ] `helm template mendabot charts/mendabot | kubectl apply --dry-run=client -f -` passes
+- [x] A new **HARD RULE 11** is added
+- [x] `helm template mendabot charts/mendabot | kubectl apply --dry-run=client -f -` passes
 
 ---
 
@@ -123,12 +121,12 @@ with `jq` use: `.errors | fromjson | map(.text) | join("; ")`
 
 ## Tasks
 
-- [ ] Update `charts/mendabot/files/prompts/core.txt`:
-  - Add the `=== CORRELATED GROUP ===` section after line 22, before `=== ENVIRONMENT ===`
+- [x] Update `charts/mendabot/files/prompts/core.txt`:
+  - Add the `=== CORRELATED GROUP ===` section after the AI analysis block, before `=== ENVIRONMENT ===`
   - Add HARD RULE 11 at the end of `=== HARD RULES ===` (after rule 10)
   - Add `## Correlated Findings` block to `=== PR BODY FORMAT ===`
     (before the closing `*Opened automatically by mendabot*` line)
-- [ ] Verify `helm template mendabot charts/mendabot | kubectl apply --dry-run=client -f -` passes
+- [x] Verify `helm template mendabot charts/mendabot | kubectl apply --dry-run=client -f -` passes
 
 ---
 
@@ -141,8 +139,8 @@ with `jq` use: `.errors | fromjson | map(.text) | join("; ")`
 
 ## Definition of Done
 
-- [ ] Prompt template updated with correlated context handling
-- [ ] HARD RULE 11 added (correct sequential number; rules 8 is intentionally absent)
-- [ ] `## Correlated Findings` block added to `=== PR BODY FORMAT ===`
-- [ ] Helm dry-run passes
-- [ ] No existing tests broken (prompt is in a file; no Go tests cover its content directly)
+- [x] Prompt template updated with correlated context handling
+- [x] HARD RULE 11 added (correct sequential number; rules 8 is intentionally absent)
+- [x] `## Correlated Findings` block added to `=== PR BODY FORMAT ===`
+- [x] Helm dry-run passes
+- [x] No existing tests broken (prompt is in a file; no Go tests cover its content directly)

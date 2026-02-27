@@ -12,7 +12,7 @@ newly-created `RemediationJob` objects are checked for correlation before dispat
 findings are grouped, labelled with a shared `CorrelationGroupID`, and handed to a single
 agent Job that investigates the full group context.
 
-## Status: Not Started
+## Status: Complete (v0.3.23 / v0.3.24)
 
 ## Dependencies
 
@@ -33,40 +33,45 @@ agent Job that investigates the full group context.
 
 ## Success Criteria
 
-- [ ] `domain.CorrelationRule` interface exists in `internal/domain/correlation.go`
-- [ ] Three built-in rules implemented: `SameNamespaceParentRule`, `PVCPodRule`,
+- [x] `domain.CorrelationRule` interface exists in `internal/domain/correlation.go`
+- [x] Three built-in rules implemented: `SameNamespaceParentRule`, `PVCPodRule`,
       `MultiPodSameNodeRule`
-- [ ] `RemediationJobReconciler` holds `RemediationJob` objects in `Pending` phase for
+- [x] `RemediationJobReconciler` holds `RemediationJob` objects in `Pending` phase for
       `CORRELATION_WINDOW_SECONDS` (default: 30) before dispatching
-- [ ] `Correlator` struct exists in `internal/correlator/correlator.go` with method
+- [x] `Correlator` struct exists in `internal/correlator/correlator.go` with method
       `Evaluate(ctx, candidate, peers, client) (CorrelationGroup, bool, error)`
       (returns the group, a found bool, and an error — idiomatic Go "found" pattern)
-- [ ] After the window, when the candidate is the **primary**: it suppresses all correlated
+- [x] After the window, when the candidate is the **primary**: it suppresses all correlated
       peers in the same reconcile call, then dispatches with the full group context
-- [ ] After the window, when the candidate is **not** the primary: it requeues after 5s
-      (never self-suppresses); the primary's reconcile will suppress it
-- [ ] All jobs in a correlation group receive `mendabot.io/correlation-group-id` and
+- [x] After the window, when the candidate is **not** the primary and the primary is still
+      `Pending`: it requeues after 5s (never self-suppresses); the primary's reconcile will
+      suppress it
+- [x] After the window, when the candidate is **not** the primary and the primary is already
+      `PhaseDispatched` or `PhaseRunning`: the non-primary immediately suppresses itself
+      using the primary's `CorrelationGroupID` (v0.3.24 bug fix — previously looped forever
+      at 5s intervals and eventually solo-dispatched)
+- [x] All jobs in a correlation group receive `mendabot.io/correlation-group-id` and
       `mendabot.io/correlation-role` labels
-- [ ] Non-primary jobs are transitioned to `Suppressed` phase by the primary's reconcile call
-- [ ] `JobBuilder.Build()` accepts a `[]v1alpha1.FindingSpec` slice and injects
+- [x] Non-primary jobs are transitioned to `Suppressed` phase (either by the primary's
+      reconcile call, or by self-suppression when the primary is already dispatched)
+- [x] `JobBuilder.Build()` accepts a `[]v1alpha1.FindingSpec` slice and injects
       `FINDING_CORRELATED_FINDINGS` as a JSON-encoded env var when the slice has > 1 entry
-      (already implemented — see STORY_03 partial state)
-- [ ] `JobBuilder.Build()` injects `FINDING_CORRELATION_GROUP_ID` when the primary
+- [x] `JobBuilder.Build()` injects `FINDING_CORRELATION_GROUP_ID` when the primary
       `RemediationJob` carries a `mendabot.io/correlation-group-id` label at dispatch time
-- [ ] `go test -timeout 30s -race ./...` passes with correlation tests
-- [ ] `DISABLE_CORRELATION=true` env var disables the window and all correlation rules,
+- [x] `go test -timeout 30s -race ./...` passes with correlation tests
+- [x] `DISABLE_CORRELATION=true` env var disables the window and all correlation rules,
       reverting to current dispatch-immediately behaviour
 
 ## Stories
 
 | Story | File | Status | Priority | Effort |
 |-------|------|--------|----------|--------|
-| Correlation domain types and rule interface | [STORY_00_domain_types.md](STORY_00_domain_types.md) | Not Started | High | 2h |
-| Built-in correlation rules | [STORY_01_builtin_rules.md](STORY_01_builtin_rules.md) | Not Started | High | 3h |
-| CorrelationWindow in RemediationJobReconciler | [STORY_02_correlation_window.md](STORY_02_correlation_window.md) | Not Started | Critical | 4h |
-| JobBuilder multi-finding support | [STORY_03_jobbuilder_multi_finding.md](STORY_03_jobbuilder_multi_finding.md) | Partial | High | 1h |
-| Prompt template update for correlated context | [STORY_04_prompt_update.md](STORY_04_prompt_update.md) | Not Started | Medium | 1h |
-| Integration tests and DISABLE_CORRELATION escape hatch | [STORY_05_integration_escape_hatch.md](STORY_05_integration_escape_hatch.md) | Not Started | High | 3h |
+| Correlation domain types and rule interface | [STORY_00_domain_types.md](STORY_00_domain_types.md) | Complete | High | 2h |
+| Built-in correlation rules | [STORY_01_builtin_rules.md](STORY_01_builtin_rules.md) | Complete | High | 3h |
+| CorrelationWindow in RemediationJobReconciler | [STORY_02_correlation_window.md](STORY_02_correlation_window.md) | Complete | Critical | 4h |
+| JobBuilder multi-finding support | [STORY_03_jobbuilder_multi_finding.md](STORY_03_jobbuilder_multi_finding.md) | Complete | High | 1h |
+| Prompt template update for correlated context | [STORY_04_prompt_update.md](STORY_04_prompt_update.md) | Complete | Medium | 1h |
+| Integration tests and DISABLE_CORRELATION escape hatch | [STORY_05_integration_escape_hatch.md](STORY_05_integration_escape_hatch.md) | Complete | High | 3h |
 
 ## Correlation Rules
 
@@ -145,19 +150,32 @@ Wait CORRELATION_WINDOW_SECONDS (default: 30s) using RequeueAfter
              │      └── Dispatch with full group findings (phase: Dispatched)
              │
              └── Candidate is NOT the primary
-                    └── Requeue after 5s — do NOT self-suppress
-                        (primary's reconcile will suppress this job when it runs)
+                    │
+                    ├── Primary is Pending ──> Requeue after 5s
+                    │   (primary's reconcile will suppress this job when its window elapses)
+                    │
+                    └── Primary is Dispatched/Running ──> Self-suppress immediately
+                        (uses primary's CorrelationGroupID; no dispatch; terminal)
+                        [v0.3.24 fix — previously looped at 5s until TTL then solo-dispatched]
 ```
 
 The hold is implemented using `ctrl.Result{RequeueAfter: remaining}` in the reconciler,
 not a goroutine sleep. This preserves the reconciler's idempotency and restart safety.
 
-**Why non-primaries must not self-suppress:** If a non-primary self-suppresses before
-the primary's window has elapsed, the primary's later `pendingPeers` call will exclude
-the now-Suppressed non-primary (filter is `Phase == Pending`). The primary dispatches
-as a solo job and the non-primary's finding is permanently lost. Instead, non-primaries
-requeue and wait for the primary to suppress them, ensuring the primary always sees all
-correlated findings as Pending peers when its window elapses.
+**Why non-primaries wait when the primary is still Pending:** If a non-primary
+self-suppresses before the primary's window has elapsed, the primary's later
+`correlationPeers` call would exclude the now-Suppressed non-primary. The primary
+dispatches as a solo job and the non-primary's finding is permanently lost. Instead,
+non-primaries requeue and wait for the primary to suppress them, ensuring the primary
+always sees all correlated findings as eligible peers when its window elapses.
+
+**Why non-primaries self-suppress when the primary is already Dispatched (v0.3.24):**
+`correlationPeers()` includes `PhaseDispatched` and `PhaseRunning` peers (not just
+`PhasePending`), so a late-arriving non-primary can see a primary that has already
+dispatched. In that case, the primary will never re-enter the correlation block to
+suppress the non-primary, so the non-primary suppresses itself using the primary's
+`CorrelationGroupID`. This prevents the pre-v0.3.24 bug where the non-primary would
+loop at 5s indefinitely and eventually solo-dispatch.
 
 A `RemediationJob`'s `CreationTimestamp` is used as the anchor for the window start.
 On reconcile, if `time.Since(rjob.CreationTimestamp) < window`, requeue. Otherwise,
@@ -196,7 +214,7 @@ returns early for any phase that is not `Failed` or `PermanentlyFailed`, which i
 | File | Change |
 |------|--------|
 | `api/v1alpha1/remediationjob_types.go` | Add `Suppressed` phase constant; add `CorrelationGroupID` to status; update `DeepCopyInto`; update enum marker |
-| `internal/controller/remediationjob_controller.go` | Add `Correlator` field; add window hold logic; add `pendingPeers` helper; primary suppresses peers then dispatches; add `case PhaseSuppressed` |
+| `internal/controller/remediationjob_controller.go` | Add `Correlator` field; add window hold logic; add `correlationPeers` helper (includes Pending/Dispatched/Running peers); primary suppresses peers then dispatches; non-primary self-suppresses if primary already dispatched; add `case PhaseSuppressed` |
 | `internal/controller/remediationjob_controller_test.go` | Tests for window, correlation, suppression |
 | `internal/jobbuilder/job.go` | Inject `FINDING_CORRELATION_GROUP_ID` env var (partially done: `FINDING_CORRELATED_FINDINGS` already injected) |
 | `internal/jobbuilder/job_test.go` | Tests for `FINDING_CORRELATION_GROUP_ID` injection |
@@ -226,12 +244,37 @@ STORY_00 (domain types) ─┬──> STORY_01 (rules)   ──┐
 
 ## Definition of Done
 
-- [ ] All unit tests pass: `go test -timeout 30s -race ./...`
-- [ ] `go build ./...` succeeds
-- [ ] `go vet ./...` clean
-- [ ] `helm template mendabot charts/mendabot | kubectl apply --dry-run=client -f -` passes
-- [ ] `DISABLE_CORRELATION=true` reverts to pre-epic dispatch behaviour (verified by test)
-- [ ] Worklog entry created in `docs/WORKLOGS/`
+- [x] All unit tests pass: `go test -timeout 30s -race ./...`
+- [x] `go build ./...` succeeds
+- [x] `go vet ./...` clean
+- [x] `helm template mendabot charts/mendabot | kubectl apply --dry-run=client -f -` passes
+- [x] `DISABLE_CORRELATION=true` reverts to pre-epic dispatch behaviour (verified by test)
+- [x] Worklog entry created in `docs/WORKLOGS/`
+
+## Post-Ship Fix (v0.3.24)
+
+After initial release in v0.3.23, a bug was identified and fixed in v0.3.24:
+
+**Bug:** A non-primary `RemediationJob` whose correlation window elapsed *after* its
+primary had already transitioned to `PhaseDispatched` would solo-dispatch instead of
+suppressing itself. Root cause: `pendingPeers()` excluded non-Pending peers, making
+the dispatched primary invisible to the correlator. The non-primary saw no peers, found
+no correlation match, and dispatched independently — producing redundant agent jobs.
+
+**Fix (v0.3.24):**
+- Renamed `pendingPeers()` → `correlationPeers()` and expanded the phase filter to
+  include `PhaseDispatched` and `PhaseRunning` in addition to `PhasePending`.
+- In the non-primary reconcile path, if the correlated primary is already
+  `PhaseDispatched` or `PhaseRunning`, the non-primary immediately calls
+  `transitionSuppressed()` on itself using the primary's `CorrelationGroupID`.
+
+Regression test: `TestCorrelationBug_PodDispatchesSolo_RegressionTest` in
+`internal/controller/remediationjob_controller_test.go` — confirmed to fail on pre-fix
+code and pass on fixed code.
+
+Validated on live cluster: after deleting stale rjobs and triggering fresh findings,
+all Deployment+Pod pairs produced exactly one dispatched Deployment rjob and one
+Suppressed Pod rjob, sharing the same `CorrelationGroupID`.
 
 **Out of scope for this epic:**
 - End-to-end tests (`test/e2e/`) — these require a real cluster or `kind` and are deferred

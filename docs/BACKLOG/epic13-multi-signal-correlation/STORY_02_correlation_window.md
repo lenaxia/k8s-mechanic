@@ -31,62 +31,66 @@ durable state.
 
 ## Acceptance Criteria
 
-- [ ] `RemediationJobReconciler` holds any new `Pending` job for `CORRELATION_WINDOW_SECONDS`
+- [x] `RemediationJobReconciler` holds any new `Pending` job for `CORRELATION_WINDOW_SECONDS`
       (default: 30) using `ctrl.Result{RequeueAfter: remaining}` before proceeding
-- [ ] After the window, the reconciler lists all `Pending` `RemediationJob` objects in the
-      same namespace and passes them to `Correlator.Evaluate`
-- [ ] `Correlator` struct exists in `internal/correlator/correlator.go` with method
+- [x] After the window, the reconciler lists all eligible `RemediationJob` objects in the
+      same namespace via `correlationPeers()` (includes Pending, Dispatched, Running) and
+      passes them to `Correlator.Evaluate`
+- [x] `Correlator` struct exists in `internal/correlator/correlator.go` with method
       `Evaluate(ctx, candidate, peers, client) (CorrelationGroup, bool, error)`
       (the `bool` is `true` when a match was found; idiomatic Go "found" return)
-- [ ] When `Correlator.Evaluate` returns `found=true` and the candidate **is the primary**:
+- [x] When `Correlator.Evaluate` returns `found=true` and the candidate **is the primary**:
   - All non-primary correlated peers (from `group.CorrelatedUIDs`) are transitioned to
     `Suppressed` phase with `CorrelationGroupID` set — by the primary's reconcile call
   - `mendabot.io/correlation-group-id` and `mendabot.io/correlation-role=primary` labels
     are patched onto the primary before `dispatch` is called
   - `mendabot.io/correlation-group-id` and `mendabot.io/correlation-role=correlated` labels
     are patched onto each suppressed peer
-  - Primary is dispatched with correlated peer findings (excluding the primary's own
-    finding, which is already in `rjob.Spec.Finding`) via `dispatch(ctx, rjob, group.AllFindings)`
-- [ ] When `Correlator.Evaluate` returns `found=true` and the candidate **is not the primary**:
+  - Primary is dispatched with correlated peer findings via `dispatch(ctx, rjob, group.AllFindings)`
+- [x] When `Correlator.Evaluate` returns `found=true`, the candidate **is not the primary**,
+      and the primary is still `Pending`:
   - The candidate does **not** self-suppress
   - Returns `ctrl.Result{RequeueAfter: 5 * time.Second}, nil` to give the primary time
     to run its own reconcile and suppress this job
-  - On the next reconcile, if the candidate is now `Suppressed` (primary acted), the
-    `case v1alpha1.PhaseSuppressed` returns immediately
-  - On the next reconcile, if the candidate is still `Pending` and still non-primary,
-    it requeues again — this is safe; the primary will suppress it when its window elapses
-- [ ] The `switch` statement in `Reconcile()` has an explicit `case v1alpha1.PhaseSuppressed`
-      that returns `ctrl.Result{}, nil` immediately, preventing suppressed jobs from
-      ever being re-dispatched on subsequent reconcile events
-- [ ] When `r.Correlator == nil` (set when `DISABLE_CORRELATION=true` in `main.go`):
+- [x] When `Correlator.Evaluate` returns `found=true`, the candidate **is not the primary**,
+      and the primary is already `PhaseDispatched` or `PhaseRunning` (v0.3.24 fix):
+  - The candidate immediately suppresses itself via `transitionSuppressed()` using the
+    primary's `CorrelationGroupID` (from `primaryJob.Status.CorrelationGroupID` or its label)
+  - Returns `ctrl.Result{}, nil` (terminal — no requeue)
+- [x] The `switch` statement in `Reconcile()` has an explicit `case v1alpha1.PhaseSuppressed`
+      that returns `ctrl.Result{}, nil` immediately
+- [x] When `r.Correlator == nil` (set when `DISABLE_CORRELATION=true` in `main.go`):
   - Window hold is skipped entirely
   - No correlator is called
   - Existing dispatch behaviour is unchanged
-- [ ] `internal/controller/remediationjob_controller_test.go` covers:
-  - Window hold: job created, reconcile returns `RequeueAfter`, job still `Pending`
-  - Window elapsed, candidate is primary: primary dispatched with correlated findings,
-    peer transitioned to `Suppressed` by primary's reconcile
-  - Window elapsed, candidate is not primary: reconcile returns `RequeueAfter: 5s`,
-    job still `Pending`; subsequent reconcile (after primary acts) finds `Suppressed`
-    and returns immediately
-  - Window elapsed, no correlation found: job dispatched normally
-  - `r.Correlator == nil`: job dispatched immediately without hold
-- [ ] `go test -timeout 30s -race ./internal/controller/...` passes
+- [x] `internal/controller/remediationjob_controller_test.go` covers all correlation paths
+      including the v0.3.24 self-suppression regression test
+- [x] `go test -timeout 30s -race ./internal/controller/...` passes
 
 ---
 
 ## Technical Implementation
 
-### Why non-primaries must not self-suppress
+### Why non-primaries wait when the primary is still Pending
 
 If a non-primary self-suppresses before the primary has reconciled, the primary's
-subsequent `pendingPeers` call filters by `Phase == Pending` only, so the now-Suppressed
-non-primary is invisible. The primary dispatches as a solo job and the non-primary's
-finding is permanently lost from the investigation context.
+subsequent `correlationPeers` call would exclude the now-Suppressed non-primary
+(it only includes Pending/Dispatched/Running). The primary dispatches as a solo job
+and the non-primary's finding is permanently lost from the investigation context.
 
 By having non-primaries requeue instead of self-suppress, all correlated findings remain
-Pending until the primary's window elapses. The primary then atomically suppresses all
+eligible until the primary's window elapses. The primary then atomically suppresses all
 non-primary peers and dispatches with the full group context in a single reconcile call.
+
+### Why non-primaries self-suppress when the primary is already Dispatched (v0.3.24)
+
+`correlationPeers()` includes `PhaseDispatched` and `PhaseRunning` peers (the original
+`pendingPeers()` only returned `PhasePending` peers). When a non-primary's window elapses
+after the primary has already dispatched, the primary is still visible in the peer list.
+The correlator matches, identifies the primary as non-Pending, and the non-primary path
+detects `PhaseDispatched`/`PhaseRunning` → immediately calls `transitionSuppressed()` on
+itself using the primary's `CorrelationGroupID`. This prevents the pre-fix infinite 5s
+requeue loop that eventually caused solo dispatch.
 
 ### `PhaseSuppressed` case in the reconciler switch
 
@@ -262,26 +266,34 @@ avoids two sources of truth for the group ID.
 Inside `dispatch`, replace the existing `r.JobBuilder.Build(rjob, nil)` call at line 298
 with `r.JobBuilder.Build(rjob, correlatedFindings)`.
 
-### `pendingPeers` helper
+### `correlationPeers` helper
 
-Lists all `Pending` `RemediationJob` objects in `r.Cfg.AgentNamespace`, excluding the
-candidate itself:
+Lists all `RemediationJob` objects in `r.Cfg.AgentNamespace` whose phase is `Pending`,
+`Dispatched`, or `Running`, excluding the candidate itself. Including Dispatched/Running
+peers is necessary for the v0.3.24 self-suppression fix: a late non-primary must be
+able to see a primary that already dispatched.
 
 ```go
-func (r *RemediationJobReconciler) pendingPeers(ctx context.Context, candidate *v1alpha1.RemediationJob) []*v1alpha1.RemediationJob {
+func (r *RemediationJobReconciler) correlationPeers(ctx context.Context, candidate *v1alpha1.RemediationJob) ([]*v1alpha1.RemediationJob, error) {
     var list v1alpha1.RemediationJobList
-    if err := r.List(ctx, &list, client.InNamespace(r.Cfg.AgentNamespace)); err != nil {
-        return nil
+    if err := r.List(ctx, &list,
+        client.InNamespace(r.Cfg.AgentNamespace),
+        client.MatchingLabels{"app.kubernetes.io/managed-by": "mendabot-watcher"},
+    ); err != nil {
+        return nil, err
     }
     var peers []*v1alpha1.RemediationJob
     for i := range list.Items {
         p := &list.Items[i]
-        if p.UID == candidate.UID || p.Status.Phase != v1alpha1.PhasePending {
+        if p.UID == candidate.UID {
             continue
         }
-        peers = append(peers, p)
+        switch p.Status.Phase {
+        case v1alpha1.PhasePending, v1alpha1.PhaseDispatched, v1alpha1.PhaseRunning:
+            peers = append(peers, p)
+        }
     }
-    return peers
+    return peers, nil
 }
 ```
 
@@ -496,31 +508,24 @@ scenarios where source deletion is possible.
 
 ## Tasks
 
-- [ ] Write reconciler tests for window hold and correlation paths (TDD — must fail first)
-- [ ] Add `case v1alpha1.PhaseSuppressed: return ctrl.Result{}, nil` to the `switch` at
-      line 64, immediately after the `PhaseCancelled` case (line 104–105)
-- [ ] Write `internal/correlator/correlator.go` with `Correlator.Evaluate` and `CorrelationGroup`
-      (including `AllFindings []v1alpha1.FindingSpec` and `CorrelatedUIDs []types.UID`)
-- [ ] Write `internal/correlator/correlator_test.go`
-- [ ] Add `Correlator *correlator.Correlator` field to `RemediationJobReconciler` struct
-- [ ] Extend `dispatch()` signature at line 270 to accept `correlatedFindings []v1alpha1.FindingSpec`;
-      update the existing fall-through call at line 247 to pass `nil`; do NOT add a `groupID`
-      parameter — `Build()` reads it from `rjob.Labels[domain.CorrelationGroupIDLabel]` which
-      is already set by `labelAsPrimary` before `dispatch` is called
-- [ ] Implement `suppressCorrelatedPeers` helper
-- [ ] Implement `labelAsPrimary` helper
-- [ ] Implement `transitionSuppressed` helper (status patch + condition + separate label patch)
-- [ ] Insert window hold block between line 226 and line 228 with the logic described above
-      (non-primary requeues after 5s; primary calls `suppressCorrelatedPeers`, `labelAsPrimary`,
-      then `dispatch` with full group context)
-- [ ] Implement `pendingPeers` helper
-- [ ] Add `CorrelationWindowSeconds`, `DisableCorrelation`, `MultiPodThreshold` to
+- [x] Write reconciler tests for window hold and correlation paths (TDD — must fail first)
+- [x] Add `case v1alpha1.PhaseSuppressed: return ctrl.Result{}, nil` to the `switch`
+- [x] Write `internal/correlator/correlator.go` with `Correlator.Evaluate` and `CorrelationGroup`
+- [x] Write `internal/correlator/correlator_test.go`
+- [x] Add `Correlator *correlator.Correlator` field to `RemediationJobReconciler` struct
+- [x] Extend `dispatch()` signature to accept `correlatedFindings []v1alpha1.FindingSpec`
+- [x] Implement `suppressCorrelatedPeers` helper
+- [x] Implement `transitionSuppressed` helper (status patch + condition + separate label patch)
+- [x] Insert window hold block with primary and non-primary paths
+- [x] Implement `correlationPeers` helper (Pending + Dispatched + Running; renamed from `pendingPeers`)
+- [x] In non-primary path: detect `PhaseDispatched`/`PhaseRunning` primary → self-suppress (v0.3.24)
+- [x] Add `CorrelationWindowSeconds`, `DisableCorrelation`, `MultiPodThreshold` to
       `config.Config` and parse them in `config.FromEnv()`
-- [ ] Add `config_test.go` cases for the three new fields
-- [ ] Add conditional `Correlator` construction in `cmd/watcher/main.go`
-- [ ] Add three env var entries to `charts/mendabot/templates/deployment-watcher.yaml`
-- [ ] Add three fields to `charts/mendabot/values.yaml` under `watcher:`
-- [ ] Run `go test -timeout 30s -race ./...` — must pass
+- [x] Add `config_test.go` cases for the three new fields
+- [x] Add conditional `Correlator` construction in `cmd/watcher/main.go`
+- [x] Add three env var entries to `charts/mendabot/templates/deployment-watcher.yaml`
+- [x] Add three fields to `charts/mendabot/values.yaml` under `watcher:`
+- [x] Run `go test -timeout 30s -race ./...` — must pass
 
 ---
 
@@ -533,11 +538,12 @@ scenarios where source deletion is possible.
 
 ## Definition of Done
 
-- [ ] Reconciler holds `Pending` jobs for the window duration
-- [ ] Primary suppresses all correlated peers in its own reconcile call
-- [ ] Non-primary requeues after 5s rather than self-suppressing
-- [ ] `PhaseSuppressed` is a terminal case in the reconciler switch
-- [ ] `DISABLE_CORRELATION=true` restores original behaviour
-- [ ] Config fields parse correctly
-- [ ] Helm chart wires the three new env vars
-- [ ] All tests pass
+- [x] Reconciler holds `Pending` jobs for the window duration
+- [x] Primary suppresses all correlated peers in its own reconcile call
+- [x] Non-primary requeues after 5s when primary is still Pending
+- [x] Non-primary self-suppresses immediately when primary is Dispatched/Running (v0.3.24)
+- [x] `PhaseSuppressed` is a terminal case in the reconciler switch
+- [x] `DISABLE_CORRELATION=true` restores original behaviour
+- [x] Config fields parse correctly
+- [x] Helm chart wires the three new env vars
+- [x] All tests pass

@@ -135,11 +135,11 @@ kind: Secret
 metadata:
   name: github-app
   namespace: mendabot
-data:
-  app-id: 2917483           # numeric ID shown on the App settings page
-  installation-id: <Installation ID> # numeric ID from the installation URL (see below)
+stringData:
+  app-id: "2917483"             # numeric ID from https://github.com/settings/apps/<your-app-name>
+  installation-id: "12345678"   # numeric ID from the installation URL (see below)
   private-key: |
-    <PEM-encoded RSA private key>
+    <contents of the .pem file downloaded from your GitHub App settings>
 ```
 
 The **App ID** is shown on the settings page for your GitHub App at `https://github.com/settings/apps/<your-app-name>`. Each user creates their own GitHub App; the project author has no visibility into your credentials, tokens, or repository.

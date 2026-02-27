@@ -142,7 +142,7 @@ data:
     <PEM-encoded RSA private key>
 ```
 
-The **App ID** is shown on `https://github.com/settings/apps/k8s-mendabot`.
+The **App ID** is shown on the settings page for your GitHub App at `https://github.com/settings/apps/<your-app-name>`. Each user creates their own GitHub App; the project author has no visibility into your credentials, tokens, or repository.
 
 The **Installation ID** is the numeric suffix in the URL when you view your app's
 installation: `https://github.com/organizations/<org>/settings/installations/<id>`

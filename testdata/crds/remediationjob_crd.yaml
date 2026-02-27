@@ -309,6 +309,34 @@ spec:
                   whether to re-dispatch or tombstone.
                 format: int32
                 type: integer
+              sinkRef:
+                description: |-
+                  SinkRef identifies the GitHub PR or issue opened by the agent.
+                  Empty until the agent writes it after opening the sink.
+                properties:
+                  number:
+                    description: Number is the PR or issue number. Required for GitHub
+                      REST API calls.
+                    type: integer
+                  repo:
+                    description: |-
+                      Repo is "owner/repo" format (e.g. "lenaxia/talos-ops-prod").
+                      Required for GitHub REST API calls.
+                    type: string
+                  type:
+                    description: Type is "pr" or "issue".
+                    type: string
+                  url:
+                    description: |-
+                      URL is the full HTML URL (e.g. https://github.com/org/repo/pull/42).
+                      Used in log messages and closure comments.
+                    type: string
+                required:
+                - number
+                - repo
+                - type
+                - url
+                type: object
             type: object
         required:
         - spec

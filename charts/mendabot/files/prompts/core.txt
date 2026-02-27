@@ -167,12 +167,16 @@ STEP 8 — Open a pull request
   git -C /workspace/repo commit -m "fix(${FINDING_KIND}/${FINDING_PARENT}): <concise description>"
   git -C /workspace/repo push origin fix/mendabot-${FINDING_FINGERPRINT}
 
-  gh pr create \
+  PR_OUTPUT=$(gh pr create \
     --repo ${GITOPS_REPO} \
     --base main \
     --head fix/mendabot-${FINDING_FINGERPRINT} \
     --title "fix(${FINDING_KIND}/${FINDING_PARENT}): <concise description>" \
-    --body "<see PR body format below>"
+    --body "<see PR body format below>" \
+    --json url,number)
+
+  # PR_OUTPUT now contains JSON: {"url":"https://...","number":42}
+  # This is consumed by STEP 9 to write SinkRef back to the RemediationJob.
 
 === PR BODY FORMAT ===
 
@@ -217,6 +221,48 @@ ${FINDING_CORRELATED_FINDINGS}
 
 ---
 *Opened automatically by mendabot*
+
+STEP 9 — Write SinkRef back to the RemediationJob (MANDATORY)
+
+After STEP 8 completes — whether a new PR was opened or an existing PR was found and
+commented on in STEP 1 — write the PR reference back to the RemediationJob status
+subresource. This enables the watcher to auto-close the PR when the underlying issue
+resolves.
+
+RJOB_NAME="mendabot-${FINDING_FINGERPRINT:0:12}"
+RJOB_NAMESPACE="${AGENT_NAMESPACE}"
+
+Capture PR_URL and PR_NUMBER:
+
+  If you opened a NEW PR in STEP 8 using --json url,number:
+    PR_URL=$(echo "$PR_OUTPUT" | jq -r '.url')
+    PR_NUMBER=$(echo "$PR_OUTPUT" | jq -r '.number')
+
+  If you found an EXISTING PR in STEP 1:
+    PR_URL=$(gh pr view --repo ${GITOPS_REPO} fix/mendabot-${FINDING_FINGERPRINT} --json url -q .url)
+    PR_NUMBER=$(gh pr view --repo ${GITOPS_REPO} fix/mendabot-${FINDING_FINGERPRINT} --json number -q .number)
+
+PR_REPO="${GITOPS_REPO}"
+
+kubectl patch remediationjob "${RJOB_NAME}" \
+  --namespace "${RJOB_NAMESPACE}" \
+  --subresource=status \
+  --type=merge \
+  --patch "{
+    \"status\": {
+      \"prRef\": \"${PR_URL}\",
+      \"sinkRef\": {
+        \"type\": \"pr\",
+        \"url\": \"${PR_URL}\",
+        \"number\": ${PR_NUMBER},
+        \"repo\": \"${PR_REPO}\"
+      }
+    }
+  }" || echo "WARNING: failed to write SinkRef to RemediationJob — PR is still open and valid"
+
+If the kubectl patch fails, print the warning and continue. The PR is already open and
+must not be retracted. The auto-close feature will not work for this run, but the
+investigation result is preserved.
 
 === HARD RULES ===
 

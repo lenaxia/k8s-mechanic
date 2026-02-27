@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -17,6 +18,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	gozapr "github.com/go-logr/zapr"
+	"github.com/golang-jwt/jwt/v5"
 	"go.uber.org/zap"
 
 	"github.com/lenaxia/k8s-mendabot/api/v1alpha1"
@@ -25,6 +27,7 @@ import (
 	"github.com/lenaxia/k8s-mendabot/internal/controller"
 	"github.com/lenaxia/k8s-mendabot/internal/correlator"
 	"github.com/lenaxia/k8s-mendabot/internal/domain"
+	igithub "github.com/lenaxia/k8s-mendabot/internal/github"
 	"github.com/lenaxia/k8s-mendabot/internal/jobbuilder"
 	"github.com/lenaxia/k8s-mendabot/internal/logging"
 	"github.com/lenaxia/k8s-mendabot/internal/provider"
@@ -32,6 +35,7 @@ import (
 	"github.com/lenaxia/k8s-mendabot/internal/readiness"
 	"github.com/lenaxia/k8s-mendabot/internal/readiness/llm"
 	"github.com/lenaxia/k8s-mendabot/internal/readiness/sink"
+	sinkhub "github.com/lenaxia/k8s-mendabot/internal/sink/github"
 )
 
 // Version is embedded at build time via ldflags:
@@ -189,6 +193,40 @@ func main() {
 		native.NewStatefulSetProvider(nativeClient),
 		native.NewJobProvider(nativeClient),
 	}
+
+	// Wire GitHub App token provider and sink closer.
+	// secretKeyRef entries on the Deployment (conditional on prAutoClose) guarantee these vars are present when the pod starts.
+	// If PRAutoClose is false, use NoopSinkCloser — no credentials needed.
+	var sinkCloser domain.SinkCloser
+	if cfg.PRAutoClose {
+		appID, err := strconv.ParseInt(os.Getenv("GITHUB_APP_ID"), 10, 64)
+		if err != nil || appID <= 0 {
+			logger.Fatal("GITHUB_APP_ID is missing or invalid; cannot start with PR_AUTO_CLOSE=true",
+				zap.Error(err))
+		}
+		installID, err := strconv.ParseInt(os.Getenv("GITHUB_APP_INSTALLATION_ID"), 10, 64)
+		if err != nil || installID <= 0 {
+			logger.Fatal("GITHUB_APP_INSTALLATION_ID is missing or invalid; cannot start with PR_AUTO_CLOSE=true",
+				zap.Error(err))
+		}
+		privKey, err := jwt.ParseRSAPrivateKeyFromPEM([]byte(os.Getenv("GITHUB_APP_PRIVATE_KEY")))
+		if err != nil {
+			logger.Fatal("GITHUB_APP_PRIVATE_KEY is missing or invalid; cannot start with PR_AUTO_CLOSE=true",
+				zap.Error(err))
+		}
+		sinkCloser = &sinkhub.GitHubSinkCloser{
+			TokenProvider: &igithub.GitHubAppTokenProvider{
+				AppID:          appID,
+				InstallationID: installID,
+				PrivateKey:     privKey,
+			},
+		}
+		logger.Info("auto-close sink enabled", zap.Bool("prAutoClose", true))
+	} else {
+		sinkCloser = domain.NoopSinkCloser{}
+		logger.Info("auto-close sink disabled (PR_AUTO_CLOSE=false)")
+	}
+
 	for _, p := range enabledProviders {
 		if err := (&provider.SourceProviderReconciler{
 			Client:           mgr.GetClient(),
@@ -199,6 +237,7 @@ func main() {
 			EventRecorder:    mgr.GetEventRecorderFor("mendabot-watcher"),
 			ReadinessChecker: combinedChecker,
 			CircuitBreaker:   cb,
+			SinkCloser:       sinkCloser,
 		}).SetupWithManager(mgr); err != nil {
 			logger.Fatal("provider setup failed", zap.Error(err))
 		}

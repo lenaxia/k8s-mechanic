@@ -100,6 +100,10 @@
           "type": "integer",
           "minimum": 1,
           "description": "Minimum number of pods failing on the same node to trigger MultiPodSameNodeRule."
+        },
+        "prAutoClose": {
+          "type": "boolean",
+          "description": "Automatically close open GitHub PRs/issues when the underlying finding resolves."
         }
       }
     },

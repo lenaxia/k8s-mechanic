@@ -74,6 +74,10 @@ type Config struct {
 	// MultiPodThreshold is the minimum number of pod findings on the same node
 	// required for MultiPodSameNodeRule to fire.
 	MultiPodThreshold int // CORRELATION_MULTI_POD_THRESHOLD — default 3
+
+	// PRAutoClose controls whether open sinks are auto-closed when a finding resolves.
+	// Default: true. Set PR_AUTO_CLOSE=false to disable.
+	PRAutoClose bool // PR_AUTO_CLOSE — default true
 }
 
 // FromEnv reads configuration from environment variables and returns a Config.
@@ -310,31 +314,12 @@ func FromEnv() (Config, error) {
 		return Config{}, fmt.Errorf("DRY_RUN must be 'true', 'false', '1', or '0', got %q", dryRunStr)
 	}
 
-	// LLM provider selection — empty string disables the LLM readiness check.
-	// bedrock and vertex are reserved for future implementation; configuring them
-	// is a startup error rather than a silent runtime block.
-	cfg.LLMProvider = os.Getenv("LLM_PROVIDER")
-	switch cfg.LLMProvider {
-	case "", "openai":
-		// valid
-	case "bedrock", "vertex":
-		return Config{}, fmt.Errorf(
-			"LLM_PROVIDER=%q is not yet implemented; set LLM_PROVIDER=openai or leave it unset to disable the LLM readiness check",
-			cfg.LLMProvider,
-		)
-	default:
-		return Config{}, fmt.Errorf(
-			"LLM_PROVIDER %q is not supported; accepted values: openai (or unset to disable)",
-			cfg.LLMProvider,
-		)
-	}
-
 	// Correlation window — how long to hold Pending jobs before dispatching.
 	// Must be at least as long as stabilization window to allow related findings to be grouped.
 	// Design invariant: CORRELATION_WINDOW >= STABILISATION_WINDOW
 	corrWindowStr := os.Getenv("CORRELATION_WINDOW_SECONDS")
 	if corrWindowStr == "" {
-		cfg.CorrelationWindowSeconds = int(cfg.StabilisationWindow.Seconds())
+		cfg.CorrelationWindowSeconds = 30
 	} else {
 		n, err := strconv.Atoi(corrWindowStr)
 		if err != nil {
@@ -366,6 +351,17 @@ func FromEnv() (Config, error) {
 			return Config{}, fmt.Errorf("CORRELATION_MULTI_POD_THRESHOLD must be a positive integer, got %d", n)
 		}
 		cfg.MultiPodThreshold = n
+	}
+
+	// PR_AUTO_CLOSE — default true; set "false" or "0" to disable sink auto-close.
+	prAutoCloseStr := os.Getenv("PR_AUTO_CLOSE")
+	switch prAutoCloseStr {
+	case "", "true", "1":
+		cfg.PRAutoClose = true
+	case "false", "0":
+		cfg.PRAutoClose = false
+	default:
+		return Config{}, fmt.Errorf("PR_AUTO_CLOSE must be 'true', 'false', '1', or '0', got %q", prAutoCloseStr)
 	}
 
 	return cfg, nil

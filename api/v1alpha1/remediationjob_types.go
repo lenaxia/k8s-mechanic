@@ -189,6 +189,22 @@ type FindingSpec struct {
 	ChainDepth int32 `json:"chainDepth,omitempty"`
 }
 
+// SinkRef identifies the GitHub PR or issue opened by the agent.
+// Set by the agent via a status patch after gh pr create succeeds.
+// Used by the watcher to auto-close the sink when the finding resolves.
+type SinkRef struct {
+	// Type is "pr" or "issue".
+	Type string `json:"type"`
+	// URL is the full HTML URL (e.g. https://github.com/org/repo/pull/42).
+	// Used in log messages and closure comments.
+	URL string `json:"url"`
+	// Number is the PR or issue number. Required for GitHub REST API calls.
+	Number int `json:"number"`
+	// Repo is "owner/repo" format (e.g. "lenaxia/talos-ops-prod").
+	// Required for GitHub REST API calls.
+	Repo string `json:"repo"`
+}
+
 // RemediationJobStatus defines the observed state of a RemediationJob.
 type RemediationJobStatus struct {
 	// Phase is the current lifecycle phase of this RemediationJob.
@@ -235,6 +251,11 @@ type RemediationJobStatus struct {
 	// (controller.go) reconstructs AllFindings from suppressed peers on restart.
 	// CorrelationGroupID here is the only status field needed for recovery.
 	CorrelationGroupID string `json:"correlationGroupID,omitempty"`
+
+	// SinkRef identifies the GitHub PR or issue opened by the agent.
+	// Empty until the agent writes it after opening the sink.
+	// +optional
+	SinkRef SinkRef `json:"sinkRef,omitempty"`
 }
 
 // RemediationJob represents one investigation and remediation attempt for a
@@ -285,6 +306,8 @@ func (in *RemediationJob) DeepCopyInto(out *RemediationJob) {
 		out.Status.Conditions = conditions
 	}
 	out.Status.CorrelationGroupID = in.Status.CorrelationGroupID
+	// SinkRef contains only value types (string, int); shallow copy is correct.
+	out.Status.SinkRef = in.Status.SinkRef
 }
 
 // DeepCopyObject implements runtime.Object.

@@ -140,7 +140,7 @@ metadata:
   name: github-app
   namespace: mechanic
 stringData:
-  app-id: "2917483"             # numeric ID from https://github.com/settings/apps/<your-app-name>
+  app-id: "<App ID>"             # numeric ID from https://github.com/settings/apps/<your-app-name>
   installation-id: "12345678"   # numeric ID from the installation URL (see below)
   private-key: |
     <contents of the .pem file downloaded from your GitHub App settings>

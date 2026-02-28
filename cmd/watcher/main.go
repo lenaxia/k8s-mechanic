@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -101,8 +102,20 @@ func main() {
 		opts.Cache.DefaultNamespaces = defaultNS
 	}
 	restCfg := ctrl.GetConfigOrDie()
-	mgr, err := ctrl.NewManager(restCfg, opts)
-	if err != nil {
+
+	// Retry ctrl.NewManager to tolerate transient Unauthorized errors that occur
+	// when the pod starts before the ServiceAccount token is fully propagated.
+	var mgr ctrl.Manager
+	for attempt := 1; attempt <= 10; attempt++ {
+		mgr, err = ctrl.NewManager(restCfg, opts)
+		if err == nil {
+			break
+		}
+		if strings.Contains(err.Error(), "Unauthorized") && attempt < 10 {
+			log.Printf("manager init attempt %d/10: transient Unauthorized, retrying in 3s: %v", attempt, err)
+			time.Sleep(3 * time.Second)
+			continue
+		}
 		log.Fatalf("unable to start manager: %v", err)
 	}
 

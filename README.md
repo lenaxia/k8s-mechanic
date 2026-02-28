@@ -1,5 +1,9 @@
 # k8s-mechanic
 
+> **Name change:** This project was previously known as **k8s-mendabot**. It has been
+> renamed to **k8s-mechanic**. The CRD API group has changed from `remediation.mendabot.io`
+> to `remediation.mechanic.io`. Existing installations will require migration.
+
 k8s-mechanic is a Kubernetes controller that watches your cluster for failures,
 investigates them automatically, and opens pull requests on your GitOps repository
 with proposed fixes — all without leaving your cluster.

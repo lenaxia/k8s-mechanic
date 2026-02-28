@@ -1,5 +1,10 @@
 # k8s-mechanic — LLM Implementation Guide
 
+> **Name change (2026-02-27):** This project was previously known as **k8s-mendabot**.
+> It has been renamed to **k8s-mechanic**. All references to `mendabot` in source,
+> manifests, and docs have been updated. The Go module path is now
+> `github.com/lenaxia/k8s-mechanic` and the CRD API group is `remediation.mechanic.io`.
+
 **Version:** 1.0
 **Last Updated:** 2026-02-25
 **Project Status:** Active Development — Design Phase

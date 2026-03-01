@@ -215,6 +215,7 @@ func main() {
 	// secretKeyRef entries on the Deployment (conditional on prAutoClose) guarantee these vars are present when the pod starts.
 	// If PRAutoClose is false, use NoopSinkCloser — no credentials needed.
 	var sinkCloser domain.SinkCloser
+	var prMergeChecker domain.PRMergeChecker
 	if cfg.PRAutoClose {
 		appID, err := strconv.ParseInt(os.Getenv("GITHUB_APP_ID"), 10, 64)
 		if err != nil || appID <= 0 {
@@ -236,16 +237,17 @@ func main() {
 			logger.Fatal("GITHUB_APP_PRIVATE_KEY is invalid (PEM parse failed); cannot start with PR_AUTO_CLOSE=true",
 				zap.Error(err))
 		}
-		sinkCloser = &sinkhub.GitHubSinkCloser{
-			TokenProvider: &igithub.GitHubAppTokenProvider{
-				AppID:          appID,
-				InstallationID: installID,
-				PrivateKey:     privKey,
-			},
+		tp := &igithub.GitHubAppTokenProvider{
+			AppID:          appID,
+			InstallationID: installID,
+			PrivateKey:     privKey,
 		}
+		sinkCloser = &sinkhub.GitHubSinkCloser{TokenProvider: tp}
+		prMergeChecker = &sinkhub.GitHubPRMergeChecker{TokenProvider: tp}
 		logger.Info("auto-close sink enabled", zap.Bool("prAutoClose", true))
 	} else {
 		sinkCloser = domain.NoopSinkCloser{}
+		prMergeChecker = domain.NoopPRMergeChecker{}
 		logger.Info("auto-close sink disabled (PR_AUTO_CLOSE=false)")
 	}
 
@@ -260,6 +262,7 @@ func main() {
 			ReadinessChecker: combinedChecker,
 			CircuitBreaker:   cb,
 			SinkCloser:       sinkCloser,
+			PRMergeChecker:   prMergeChecker,
 		}).SetupWithManager(mgr); err != nil {
 			logger.Fatal("provider setup failed", zap.Error(err))
 		}

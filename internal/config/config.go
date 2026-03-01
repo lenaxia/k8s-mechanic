@@ -79,6 +79,12 @@ type Config struct {
 	// Default: true. Set PR_AUTO_CLOSE=false to disable.
 	PRAutoClose bool // PR_AUTO_CLOSE — default true
 
+	// RemediationJobShortTTLSeconds is the TTL used for Succeeded RemediationJobs
+	// whose associated PR was not merged (or no PR was opened).  Once the short TTL
+	// expires the tombstone is deleted and a fresh investigation is allowed.
+	// Default: 86400 (24 hours).  Must be < RemediationJobTTLSeconds.
+	RemediationJobShortTTLSeconds int // REMEDIATION_JOB_SHORT_TTL_SECONDS — default 86400
+
 	// Agent Job resource limits. Applied to all three Job containers
 	// (git-token-clone, dry-run-gate, mendabot-agent).
 	// Defaults are conservative; tune via Helm values or env vars.
@@ -370,6 +376,25 @@ func FromEnv() (Config, error) {
 		cfg.PRAutoClose = false
 	default:
 		return Config{}, fmt.Errorf("PR_AUTO_CLOSE must be 'true', 'false', '1', or '0', got %q", prAutoCloseStr)
+	}
+
+	// REMEDIATION_JOB_SHORT_TTL_SECONDS — default 86400 (24h).
+	// Must be > 0 and < REMEDIATION_JOB_TTL_SECONDS.
+	shortTTLStr := os.Getenv("REMEDIATION_JOB_SHORT_TTL_SECONDS")
+	if shortTTLStr == "" {
+		cfg.RemediationJobShortTTLSeconds = 86400
+	} else {
+		n, err := strconv.Atoi(shortTTLStr)
+		if err != nil {
+			return Config{}, fmt.Errorf("REMEDIATION_JOB_SHORT_TTL_SECONDS must be an integer: %w", err)
+		}
+		if n <= 0 {
+			return Config{}, fmt.Errorf("REMEDIATION_JOB_SHORT_TTL_SECONDS must be a positive integer, got %d", n)
+		}
+		if n > math.MaxInt32 {
+			return Config{}, fmt.Errorf("REMEDIATION_JOB_SHORT_TTL_SECONDS must be at most %d, got %d", math.MaxInt32, n)
+		}
+		cfg.RemediationJobShortTTLSeconds = n
 	}
 
 	// Agent Job resource limits — applied to all Job containers.

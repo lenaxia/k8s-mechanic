@@ -260,6 +260,19 @@ type RemediationJobStatus struct {
 	// Empty until the agent writes it after opening the sink.
 	// +optional
 	SinkRef SinkRef `json:"sinkRef,omitempty"`
+
+	// PRMerged is true once the provider has confirmed that the GitHub PR
+	// referenced by SinkRef was merged.  When true, the long TTL
+	// (REMEDIATION_JOB_TTL_SECONDS) is used relative to PRMergedAt.
+	// When false (or absent), the short TTL (REMEDIATION_JOB_SHORT_TTL_SECONDS)
+	// is used relative to CompletedAt.
+	// +optional
+	PRMerged bool `json:"prMerged,omitempty"`
+
+	// PRMergedAt is the time the provider confirmed the PR was merged.
+	// Only set when PRMerged is true.
+	// +optional
+	PRMergedAt *metav1.Time `json:"prMergedAt,omitempty"`
 }
 
 // RemediationJob represents one investigation and remediation attempt for a
@@ -312,6 +325,11 @@ func (in *RemediationJob) DeepCopyInto(out *RemediationJob) {
 	out.Status.CorrelationGroupID = in.Status.CorrelationGroupID
 	// SinkRef contains only value types (string, int); shallow copy is correct.
 	out.Status.SinkRef = in.Status.SinkRef
+	out.Status.PRMerged = in.Status.PRMerged
+	if in.Status.PRMergedAt != nil {
+		t := *in.Status.PRMergedAt
+		out.Status.PRMergedAt = &t
+	}
 }
 
 // DeepCopyObject implements runtime.Object.

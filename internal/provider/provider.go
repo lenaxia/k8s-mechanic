@@ -44,8 +44,12 @@ type SourceProviderReconciler struct {
 	// SinkCloser closes open GitHub sinks when a finding resolves.
 	// nil disables auto-close (equivalent to PR_AUTO_CLOSE=false).
 	SinkCloser domain.SinkCloser
-	firstSeen  *BoundedMap
-	initOnce   sync.Once
+	// PRMergeChecker checks whether a GitHub PR has been merged.
+	// Used in the dedup path to determine whether to apply the short or long TTL.
+	// nil disables merge-state checks (all Succeeded tombstones use the short TTL).
+	PRMergeChecker domain.PRMergeChecker
+	firstSeen      *BoundedMap
+	initOnce       sync.Once
 }
 
 // ReadinessCacheTTL is the recommended TTL for CachedChecker wrappers around
@@ -423,6 +427,123 @@ func (r *SourceProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			if delErr := r.Delete(ctx, rjob); delErr != nil && !apierrors.IsNotFound(delErr) {
 				return ctrl.Result{}, delErr
 			}
+		case v1alpha1.PhaseSucceeded:
+			// Tombstone TTL check: decide whether to suppress or allow re-investigation.
+			//
+			// If the PR was merged (PRMerged=true): use the long TTL.  The tombstone
+			// is still alive — suppress.
+			//
+			// If no PR was opened or the PR was not yet confirmed merged: lazily check
+			// GitHub.  On merge confirmation, patch PRMerged=true on the tombstone and
+			// suppress.  If not yet merged and within the short TTL, suppress and
+			// requeue.  If the short TTL has elapsed, allow this finding through
+			// (tombstone is effectively expired; the RJob controller will delete it
+			// on its own TTL schedule, but we don't block on that).
+			if rjob.Status.PRMerged {
+				// Already confirmed merged → suppress (long TTL governs deletion).
+				if r.Log != nil {
+					r.Log.Info("finding suppressed",
+						zap.Bool("audit", true),
+						zap.String("event", "finding.suppressed.duplicate"),
+						zap.String("provider", r.Provider.ProviderName()),
+						zap.String("fingerprint", fp[:12]),
+						zap.String("remediationJob", rjob.Name),
+						zap.String("phase", string(rjob.Status.Phase)),
+					)
+				}
+				if r.EventRecorder != nil {
+					r.EventRecorder.Eventf(obj, corev1.EventTypeNormal, "DuplicateFingerprint", "Existing RemediationJob %s already covers this finding (PR merged)", rjob.Name)
+				}
+				return ctrl.Result{}, nil
+			}
+
+			// Not yet confirmed merged — check GitHub if a PR exists and checker is wired.
+			if rjob.Status.SinkRef.URL != "" && r.PRMergeChecker != nil {
+				merged, mergeErr := r.PRMergeChecker.IsMerged(ctx, rjob.Status.SinkRef)
+				if mergeErr != nil {
+					// Transient error — treat as not-yet-merged; fall through to TTL check.
+					if r.Log != nil {
+						r.Log.Warn("PR merge check failed; treating as unmerged",
+							zap.String("remediationJob", rjob.Name),
+							zap.String("sinkURL", rjob.Status.SinkRef.URL),
+							zap.Error(mergeErr),
+						)
+					}
+				} else if merged {
+					// PR is now merged — patch the tombstone and suppress.
+					now := metav1.Now()
+					rjobCopy := rjob.DeepCopyObject().(*v1alpha1.RemediationJob)
+					rjob.Status.PRMerged = true
+					rjob.Status.PRMergedAt = &now
+					if patchErr := r.Status().Patch(ctx, rjob, client.MergeFrom(rjobCopy)); patchErr != nil && !apierrors.IsNotFound(patchErr) {
+						// Non-fatal: log and suppress anyway; patch will retry next reconcile.
+						if r.Log != nil {
+							r.Log.Warn("failed to patch PRMerged on tombstone; suppressing anyway",
+								zap.String("remediationJob", rjob.Name),
+								zap.Error(patchErr),
+							)
+						}
+					}
+					if r.Log != nil {
+						r.Log.Info("finding suppressed",
+							zap.Bool("audit", true),
+							zap.String("event", "finding.suppressed.duplicate"),
+							zap.String("provider", r.Provider.ProviderName()),
+							zap.String("fingerprint", fp[:12]),
+							zap.String("remediationJob", rjob.Name),
+							zap.String("phase", string(rjob.Status.Phase)),
+							zap.Bool("prMerged", true),
+						)
+					}
+					if r.EventRecorder != nil {
+						r.EventRecorder.Eventf(obj, corev1.EventTypeNormal, "DuplicateFingerprint", "Existing RemediationJob %s already covers this finding (PR just merged)", rjob.Name)
+					}
+					return ctrl.Result{}, nil
+				}
+			}
+
+			// PR not merged (or no checker): apply short TTL relative to CompletedAt.
+			shortTTL := time.Duration(r.Cfg.RemediationJobShortTTLSeconds) * time.Second
+			if shortTTL == 0 {
+				shortTTL = 24 * time.Hour
+			}
+			if rjob.Status.CompletedAt != nil && time.Since(rjob.Status.CompletedAt.Time) < shortTTL {
+				// Still within short TTL — suppress.
+				if r.Log != nil {
+					r.Log.Info("finding suppressed",
+						zap.Bool("audit", true),
+						zap.String("event", "finding.suppressed.duplicate"),
+						zap.String("provider", r.Provider.ProviderName()),
+						zap.String("fingerprint", fp[:12]),
+						zap.String("remediationJob", rjob.Name),
+						zap.String("phase", string(rjob.Status.Phase)),
+						zap.Bool("prMerged", false),
+						zap.Duration("shortTTLRemaining", time.Until(rjob.Status.CompletedAt.Time.Add(shortTTL))),
+					)
+				}
+				if r.EventRecorder != nil {
+					r.EventRecorder.Eventf(obj, corev1.EventTypeNormal, "DuplicateFingerprint", "Existing RemediationJob %s already covers this finding (within short TTL)", rjob.Name)
+				}
+				return ctrl.Result{}, nil
+			}
+			// Short TTL elapsed and PR not merged — delete the tombstone to make
+			// room for a fresh RJob, then requeue immediately.  On the next
+			// reconcile, the fingerprint list will be empty and a new RJob will
+			// be created.
+			if r.Log != nil {
+				r.Log.Info("tombstone short TTL elapsed; deleting tombstone for re-investigation",
+					zap.Bool("audit", true),
+					zap.String("event", "finding.tombstone_expired"),
+					zap.String("provider", r.Provider.ProviderName()),
+					zap.String("fingerprint", fp[:12]),
+					zap.String("remediationJob", rjob.Name),
+					zap.Bool("prMerged", false),
+				)
+			}
+			if delErr := r.Delete(ctx, rjob); delErr != nil && !apierrors.IsNotFound(delErr) {
+				return ctrl.Result{}, fmt.Errorf("deleting expired tombstone: %w", delErr)
+			}
+			return ctrl.Result{Requeue: true}, nil
 		default:
 			if r.Log != nil {
 				r.Log.Info("finding suppressed",

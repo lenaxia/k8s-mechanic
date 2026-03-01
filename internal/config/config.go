@@ -78,6 +78,14 @@ type Config struct {
 	// PRAutoClose controls whether open sinks are auto-closed when a finding resolves.
 	// Default: true. Set PR_AUTO_CLOSE=false to disable.
 	PRAutoClose bool // PR_AUTO_CLOSE — default true
+
+	// Agent Job resource limits. Applied to all three Job containers
+	// (git-token-clone, dry-run-gate, mendabot-agent).
+	// Defaults are conservative; tune via Helm values or env vars.
+	AgentCPURequest string // AGENT_CPU_REQUEST    — default "100m"
+	AgentMemRequest string // AGENT_MEM_REQUEST    — default "128Mi"
+	AgentCPULimit   string // AGENT_CPU_LIMIT      — default "500m"
+	AgentMemLimit   string // AGENT_MEM_LIMIT      — default "512Mi"
 }
 
 // FromEnv reads configuration from environment variables and returns a Config.
@@ -362,6 +370,26 @@ func FromEnv() (Config, error) {
 		cfg.PRAutoClose = false
 	default:
 		return Config{}, fmt.Errorf("PR_AUTO_CLOSE must be 'true', 'false', '1', or '0', got %q", prAutoCloseStr)
+	}
+
+	// Agent Job resource limits — applied to all Job containers.
+	// Values are passed verbatim to Kubernetes; invalid quantities cause a Job
+	// creation error at runtime, not a startup error here, to keep startup fast.
+	cfg.AgentCPURequest = os.Getenv("AGENT_CPU_REQUEST")
+	if cfg.AgentCPURequest == "" {
+		cfg.AgentCPURequest = "100m"
+	}
+	cfg.AgentMemRequest = os.Getenv("AGENT_MEM_REQUEST")
+	if cfg.AgentMemRequest == "" {
+		cfg.AgentMemRequest = "128Mi"
+	}
+	cfg.AgentCPULimit = os.Getenv("AGENT_CPU_LIMIT")
+	if cfg.AgentCPULimit == "" {
+		cfg.AgentCPULimit = "500m"
+	}
+	cfg.AgentMemLimit = os.Getenv("AGENT_MEM_LIMIT")
+	if cfg.AgentMemLimit == "" {
+		cfg.AgentMemLimit = "512Mi"
 	}
 
 	return cfg, nil

@@ -47,6 +47,6 @@ jobs:
           retention-days: 5
 
       - name: Upload SARIF results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@c0fc915677567258ee3c194d03ffe7ae3dc8d741 # v3
+        uses: github/codeql-action/upload-sarif@45580472a5bb82c4681c4ac726cfdb60060c2ee1 # v3
         with:
           sarif_file: results.sarif

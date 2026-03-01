@@ -17,6 +17,9 @@ import (
 // Compile-time interface check.
 var _ domain.SinkCloser = (*sinkhub.GitHubSinkCloser)(nil)
 
+// errFakeToken is a sentinel error returned by staticTokenProvider when err is set.
+var errFakeToken = fmt.Errorf("fake token error")
+
 // staticTokenProvider is a test double for TokenProvider.
 type staticTokenProvider struct {
 	token string

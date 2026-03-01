@@ -3662,3 +3662,368 @@ func TestAutoClose_PathB_IsNotFound_SucceededJob(t *testing.T) {
 		t.Errorf("rjob should still exist after Path B auto-close, got: %v", err)
 	}
 }
+
+// --------------------------------------------------------------------------
+// PR merge-state dedup tests
+// --------------------------------------------------------------------------
+
+// fakePRMergeChecker is a controllable domain.PRMergeChecker for unit tests.
+type fakePRMergeChecker struct {
+	merged bool
+	err    error
+	calls  int
+}
+
+func (f *fakePRMergeChecker) IsMerged(_ context.Context, ref v1alpha1.SinkRef) (bool, error) {
+	if ref.URL == "" {
+		return false, nil
+	}
+	f.calls++
+	return f.merged, f.err
+}
+
+// makeSucceededTombstone builds a Succeeded RemediationJob tombstone for dedup tests.
+func makeSucceededTombstone(fp string, completedAt time.Time, sinkURL string, prMerged bool, prMergedAt *metav1.Time) *v1alpha1.RemediationJob {
+	ca := metav1.NewTime(completedAt)
+	rjob := &v1alpha1.RemediationJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "mechanic-" + fp[:12],
+			Namespace: agentNamespace,
+			Labels: map[string]string{
+				"remediation.mechanic.io/fingerprint": fp[:12],
+				"app.kubernetes.io/managed-by":        "mechanic-watcher",
+			},
+		},
+		Spec: v1alpha1.RemediationJobSpec{
+			Fingerprint: fp,
+			SourceType:  "native",
+			Finding: v1alpha1.FindingSpec{
+				Kind:         "Deployment",
+				Name:         "my-app",
+				Namespace:    "default",
+				ParentObject: "Deployment/my-app",
+			},
+		},
+		Status: v1alpha1.RemediationJobStatus{
+			Phase:       v1alpha1.PhaseSucceeded,
+			CompletedAt: &ca,
+			PRMerged:    prMerged,
+			PRMergedAt:  prMergedAt,
+		},
+	}
+	if sinkURL != "" {
+		rjob.Status.SinkRef = v1alpha1.SinkRef{
+			Type:   "pr",
+			URL:    sinkURL,
+			Number: 42,
+			Repo:   "org/repo",
+		}
+	}
+	return rjob
+}
+
+// TestDedup_PRMerged_Suppressed: PRMerged=true → suppress without calling checker.
+func TestDedup_PRMerged_Suppressed(t *testing.T) {
+	t.Parallel()
+	finding := &domain.Finding{
+		Kind: "Deployment", Name: "my-app", Namespace: "default",
+		ParentObject: "Deployment/my-app",
+		Errors:       `[{"text":"CrashLoopBackOff"}]`,
+	}
+	fp, _ := domain.FindingFingerprint(finding)
+
+	pma := metav1.NewTime(time.Now().Add(-1 * time.Hour))
+	tombstone := makeSucceededTombstone(fp, time.Now().Add(-2*time.Hour), "https://github.com/org/repo/pull/42", true, &pma)
+
+	obj := makeWatchedObject("my-app", "default")
+	c := newTestClient(obj, tombstone)
+	checker := &fakePRMergeChecker{merged: false} // should not be called
+
+	r := &provider.SourceProviderReconciler{
+		Client: c, Scheme: newTestScheme(),
+		Cfg:            config.Config{AgentNamespace: agentNamespace, RemediationJobShortTTLSeconds: 86400},
+		Provider:       &fakeSourceProvider{name: "native", objectType: &corev1.ConfigMap{}, finding: finding},
+		PRMergeChecker: checker,
+	}
+
+	_, err := r.Reconcile(context.Background(), reqFor("my-app", "default"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if checker.calls != 0 {
+		t.Errorf("expected 0 GitHub calls when PRMerged=true, got %d", checker.calls)
+	}
+	// No new RJob should be created.
+	var list v1alpha1.RemediationJobList
+	_ = c.List(context.Background(), &list, client.InNamespace(agentNamespace))
+	if len(list.Items) != 1 {
+		t.Errorf("expected 1 rjob (tombstone only), got %d", len(list.Items))
+	}
+}
+
+// TestDedup_UnmergedWithinShortTTL_Suppressed: PR exists, not merged, within 24h → suppress.
+func TestDedup_UnmergedWithinShortTTL_Suppressed(t *testing.T) {
+	t.Parallel()
+	finding := &domain.Finding{
+		Kind: "Deployment", Name: "my-app", Namespace: "default",
+		ParentObject: "Deployment/my-app",
+		Errors:       `[{"text":"CrashLoopBackOff"}]`,
+	}
+	fp, _ := domain.FindingFingerprint(finding)
+
+	// Completed 1 hour ago → within 24h short TTL.
+	tombstone := makeSucceededTombstone(fp, time.Now().Add(-1*time.Hour), "https://github.com/org/repo/pull/42", false, nil)
+
+	obj := makeWatchedObject("my-app", "default")
+	c := newTestClient(obj, tombstone)
+	checker := &fakePRMergeChecker{merged: false} // PR not yet merged
+
+	r := &provider.SourceProviderReconciler{
+		Client: c, Scheme: newTestScheme(),
+		Cfg:            config.Config{AgentNamespace: agentNamespace, RemediationJobShortTTLSeconds: 86400},
+		Provider:       &fakeSourceProvider{name: "native", objectType: &corev1.ConfigMap{}, finding: finding},
+		PRMergeChecker: checker,
+	}
+
+	_, err := r.Reconcile(context.Background(), reqFor("my-app", "default"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if checker.calls != 1 {
+		t.Errorf("expected 1 GitHub call for unmerged PR, got %d", checker.calls)
+	}
+	// No new RJob.
+	var list v1alpha1.RemediationJobList
+	_ = c.List(context.Background(), &list, client.InNamespace(agentNamespace))
+	if len(list.Items) != 1 {
+		t.Errorf("expected 1 rjob (tombstone only), got %d", len(list.Items))
+	}
+}
+
+// TestDedup_PRJustMerged_SuppressedAndPatched: GitHub returns merged → patch PRMerged=true, suppress.
+func TestDedup_PRJustMerged_SuppressedAndPatched(t *testing.T) {
+	t.Parallel()
+	finding := &domain.Finding{
+		Kind: "Deployment", Name: "my-app", Namespace: "default",
+		ParentObject: "Deployment/my-app",
+		Errors:       `[{"text":"CrashLoopBackOff"}]`,
+	}
+	fp, _ := domain.FindingFingerprint(finding)
+
+	tombstone := makeSucceededTombstone(fp, time.Now().Add(-30*time.Minute), "https://github.com/org/repo/pull/42", false, nil)
+
+	obj := makeWatchedObject("my-app", "default")
+	c := newTestClient(obj, tombstone)
+	checker := &fakePRMergeChecker{merged: true}
+
+	r := &provider.SourceProviderReconciler{
+		Client: c, Scheme: newTestScheme(),
+		Cfg:            config.Config{AgentNamespace: agentNamespace, RemediationJobShortTTLSeconds: 86400},
+		Provider:       &fakeSourceProvider{name: "native", objectType: &corev1.ConfigMap{}, finding: finding},
+		PRMergeChecker: checker,
+	}
+
+	_, err := r.Reconcile(context.Background(), reqFor("my-app", "default"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if checker.calls != 1 {
+		t.Errorf("expected 1 GitHub call, got %d", checker.calls)
+	}
+	// Tombstone must have PRMerged=true patched.
+	var updated v1alpha1.RemediationJob
+	_ = c.Get(context.Background(), types.NamespacedName{Name: tombstone.Name, Namespace: agentNamespace}, &updated)
+	if !updated.Status.PRMerged {
+		t.Error("expected PRMerged=true to be patched onto tombstone")
+	}
+	if updated.Status.PRMergedAt == nil {
+		t.Error("expected PRMergedAt to be set on tombstone")
+	}
+	// No new RJob.
+	var list v1alpha1.RemediationJobList
+	_ = c.List(context.Background(), &list, client.InNamespace(agentNamespace))
+	if len(list.Items) != 1 {
+		t.Errorf("expected 1 rjob (tombstone only), got %d", len(list.Items))
+	}
+}
+
+// TestDedup_ShortTTLElapsed_ReInvestigates: PR not merged and short TTL elapsed → new RJob created.
+func TestDedup_ShortTTLElapsed_ReInvestigates(t *testing.T) {
+	t.Parallel()
+	finding := &domain.Finding{
+		Kind: "Deployment", Name: "my-app", Namespace: "default",
+		ParentObject: "Deployment/my-app",
+		Errors:       `[{"text":"CrashLoopBackOff"}]`,
+	}
+	fp, _ := domain.FindingFingerprint(finding)
+
+	// Completed 25 hours ago → past 24h short TTL.
+	tombstone := makeSucceededTombstone(fp, time.Now().Add(-25*time.Hour), "https://github.com/org/repo/pull/42", false, nil)
+
+	obj := makeWatchedObject("my-app", "default")
+	c := newTestClient(obj, tombstone)
+	checker := &fakePRMergeChecker{merged: false}
+
+	r := &provider.SourceProviderReconciler{
+		Client: c, Scheme: newTestScheme(),
+		Cfg: config.Config{
+			AgentNamespace:                agentNamespace,
+			RemediationJobShortTTLSeconds: 86400,
+			StabilisationWindow:           0, // disable stabilisation for this test
+		},
+		Provider:       &fakeSourceProvider{name: "native", objectType: &corev1.ConfigMap{}, finding: finding},
+		PRMergeChecker: checker,
+	}
+
+	// First reconcile: tombstone expired → deleted, requeue requested.
+	result, err := r.Reconcile(context.Background(), reqFor("my-app", "default"))
+	if err != nil {
+		t.Fatalf("unexpected error on first reconcile: %v", err)
+	}
+	if !result.Requeue {
+		t.Errorf("expected Requeue=true after tombstone expiry, got %+v", result)
+	}
+
+	// Second reconcile: tombstone gone → new RJob created.
+	_, err = r.Reconcile(context.Background(), reqFor("my-app", "default"))
+	if err != nil {
+		t.Fatalf("unexpected error on second reconcile: %v", err)
+	}
+	var list v1alpha1.RemediationJobList
+	_ = c.List(context.Background(), &list, client.InNamespace(agentNamespace))
+	if len(list.Items) != 1 {
+		t.Errorf("expected 1 new RJob after tombstone deleted; got %d", len(list.Items))
+	}
+	// The new RJob must not be the old tombstone (same name is fine — it's a fresh create).
+	if list.Items[0].Status.Phase == v1alpha1.PhaseSucceeded {
+		t.Error("new RJob should not be in Succeeded phase")
+	}
+}
+
+// TestDedup_NoPR_ShortTTLElapsed_ReInvestigates: no PR opened and short TTL elapsed → new RJob.
+func TestDedup_NoPR_ShortTTLElapsed_ReInvestigates(t *testing.T) {
+	t.Parallel()
+	finding := &domain.Finding{
+		Kind: "Deployment", Name: "my-app", Namespace: "default",
+		ParentObject: "Deployment/my-app",
+		Errors:       `[{"text":"CrashLoopBackOff"}]`,
+	}
+	fp, _ := domain.FindingFingerprint(finding)
+
+	// No PR (empty SinkRef), completed 25h ago.
+	tombstone := makeSucceededTombstone(fp, time.Now().Add(-25*time.Hour), "", false, nil)
+
+	obj := makeWatchedObject("my-app", "default")
+	c := newTestClient(obj, tombstone)
+	checker := &fakePRMergeChecker{} // should not be called
+
+	r := &provider.SourceProviderReconciler{
+		Client: c, Scheme: newTestScheme(),
+		Cfg: config.Config{
+			AgentNamespace:                agentNamespace,
+			RemediationJobShortTTLSeconds: 86400,
+			StabilisationWindow:           0,
+		},
+		Provider:       &fakeSourceProvider{name: "native", objectType: &corev1.ConfigMap{}, finding: finding},
+		PRMergeChecker: checker,
+	}
+
+	// First reconcile: tombstone expired → deleted, requeue.
+	result, err := r.Reconcile(context.Background(), reqFor("my-app", "default"))
+	if err != nil {
+		t.Fatalf("unexpected error on first reconcile: %v", err)
+	}
+	if !result.Requeue {
+		t.Errorf("expected Requeue=true after tombstone expiry, got %+v", result)
+	}
+	if checker.calls != 0 {
+		t.Errorf("expected 0 GitHub calls when no PR exists, got %d", checker.calls)
+	}
+
+	// Second reconcile: tombstone gone → new RJob created.
+	_, err = r.Reconcile(context.Background(), reqFor("my-app", "default"))
+	if err != nil {
+		t.Fatalf("unexpected error on second reconcile: %v", err)
+	}
+	var list v1alpha1.RemediationJobList
+	_ = c.List(context.Background(), &list, client.InNamespace(agentNamespace))
+	if len(list.Items) != 1 {
+		t.Errorf("expected 1 new RJob after no-PR tombstone expired; got %d rjobs", len(list.Items))
+	}
+	if list.Items[0].Status.Phase == v1alpha1.PhaseSucceeded {
+		t.Error("new RJob should not be in Succeeded phase")
+	}
+}
+
+// TestDedup_NoPR_WithinShortTTL_Suppressed: no PR, within 24h → suppress, no GitHub call.
+func TestDedup_NoPR_WithinShortTTL_Suppressed(t *testing.T) {
+	t.Parallel()
+	finding := &domain.Finding{
+		Kind: "Deployment", Name: "my-app", Namespace: "default",
+		ParentObject: "Deployment/my-app",
+		Errors:       `[{"text":"CrashLoopBackOff"}]`,
+	}
+	fp, _ := domain.FindingFingerprint(finding)
+
+	// No PR, completed 1h ago → within 24h.
+	tombstone := makeSucceededTombstone(fp, time.Now().Add(-1*time.Hour), "", false, nil)
+
+	obj := makeWatchedObject("my-app", "default")
+	c := newTestClient(obj, tombstone)
+	checker := &fakePRMergeChecker{}
+
+	r := &provider.SourceProviderReconciler{
+		Client: c, Scheme: newTestScheme(),
+		Cfg:            config.Config{AgentNamespace: agentNamespace, RemediationJobShortTTLSeconds: 86400},
+		Provider:       &fakeSourceProvider{name: "native", objectType: &corev1.ConfigMap{}, finding: finding},
+		PRMergeChecker: checker,
+	}
+
+	_, err := r.Reconcile(context.Background(), reqFor("my-app", "default"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if checker.calls != 0 {
+		t.Errorf("expected 0 GitHub calls, got %d", checker.calls)
+	}
+	var list v1alpha1.RemediationJobList
+	_ = c.List(context.Background(), &list, client.InNamespace(agentNamespace))
+	if len(list.Items) != 1 {
+		t.Errorf("expected 1 rjob (tombstone only), got %d", len(list.Items))
+	}
+}
+
+// TestDedup_MergeCheckerError_SuppressedWithinShortTTL: GitHub error → treat as unmerged, suppress within TTL.
+func TestDedup_MergeCheckerError_SuppressedWithinShortTTL(t *testing.T) {
+	t.Parallel()
+	finding := &domain.Finding{
+		Kind: "Deployment", Name: "my-app", Namespace: "default",
+		ParentObject: "Deployment/my-app",
+		Errors:       `[{"text":"CrashLoopBackOff"}]`,
+	}
+	fp, _ := domain.FindingFingerprint(finding)
+
+	tombstone := makeSucceededTombstone(fp, time.Now().Add(-1*time.Hour), "https://github.com/org/repo/pull/42", false, nil)
+
+	obj := makeWatchedObject("my-app", "default")
+	c := newTestClient(obj, tombstone)
+	checker := &fakePRMergeChecker{merged: false, err: errors.New("rate limited")}
+
+	r := &provider.SourceProviderReconciler{
+		Client: c, Scheme: newTestScheme(),
+		Cfg:            config.Config{AgentNamespace: agentNamespace, RemediationJobShortTTLSeconds: 86400},
+		Provider:       &fakeSourceProvider{name: "native", objectType: &corev1.ConfigMap{}, finding: finding},
+		PRMergeChecker: checker,
+	}
+
+	_, err := r.Reconcile(context.Background(), reqFor("my-app", "default"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Still suppressed because within short TTL.
+	var list v1alpha1.RemediationJobList
+	_ = c.List(context.Background(), &list, client.InNamespace(agentNamespace))
+	if len(list.Items) != 1 {
+		t.Errorf("expected 1 rjob (tombstone) on checker error within TTL, got %d", len(list.Items))
+	}
+}

@@ -72,6 +72,10 @@ func (r *RemediationJobReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	ttl := time.Duration(r.Cfg.RemediationJobTTLSeconds) * time.Second
+	shortTTL := time.Duration(r.Cfg.RemediationJobShortTTLSeconds) * time.Second
+	if shortTTL == 0 {
+		shortTTL = 24 * time.Hour
+	}
 
 	switch rjob.Status.Phase {
 	case v1alpha1.PhaseSucceeded:
@@ -89,7 +93,19 @@ func (r *RemediationJobReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			}
 			return ctrl.Result{RequeueAfter: time.Second}, nil
 		}
-		deadline := rjob.Status.CompletedAt.Add(ttl)
+		// Choose TTL and clock-start based on PR merge state:
+		//   PRMerged=true  → long TTL from PRMergedAt (or CompletedAt if PRMergedAt unset)
+		//   PRMerged=false → short TTL from CompletedAt
+		var deadline time.Time
+		if rjob.Status.PRMerged {
+			clockStart := rjob.Status.CompletedAt.Time
+			if rjob.Status.PRMergedAt != nil {
+				clockStart = rjob.Status.PRMergedAt.Time
+			}
+			deadline = clockStart.Add(ttl)
+		} else {
+			deadline = rjob.Status.CompletedAt.Time.Add(shortTTL)
+		}
 		if time.Now().Before(deadline) {
 			return ctrl.Result{RequeueAfter: time.Until(deadline)}, nil
 		}
@@ -103,6 +119,7 @@ func (r *RemediationJobReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 				zap.String("remediationJob", rjob.Name),
 				zap.String("namespace", rjob.Namespace),
 				zap.String("prRef", rjob.Status.PRRef),
+				zap.Bool("prMerged", rjob.Status.PRMerged),
 			)
 		}
 		// CompletedAt is nil — the terminal status-patch for this job failed in a

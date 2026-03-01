@@ -441,14 +441,15 @@ func (r *SourceProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 	}
 
-	// Parent-hierarchy suppression: if an active RemediationJob already exists for
-	// the same namespace+parentObject with a higher-hierarchy kind (e.g. Deployment
-	// while this finding is a Pod), suppress this finding. This prevents duplicate
-	// investigations when the native provider emits both a Deployment finding and a
-	// Pod finding for the same parent — the Deployment-level investigation covers both.
+	// Parent-hierarchy suppression: if a RemediationJob already exists for the same
+	// namespace+parentObject with a higher-hierarchy kind (e.g. Deployment while this
+	// finding is a Pod), suppress this finding — regardless of that peer's phase.
 	//
-	// "Active" means any phase except Succeeded (which is terminal and no longer
-	// represents an ongoing investigation).
+	// Rationale: a Deployment-level investigation covers all Pods owned by that
+	// Deployment. Allowing Pod-level jobs to fire after the Deployment job Succeeded
+	// (but the problem persisted) leads to unbounded Pod-level RJobs for every new
+	// rollout attempt. Instead, the Deployment fingerprint's own dedup TTL governs
+	// when a fresh Deployment-level investigation is allowed.
 	if finding.ParentObject != "" {
 		var allRjobs v1alpha1.RemediationJobList
 		if err := r.List(ctx, &allRjobs,
@@ -466,9 +467,6 @@ func (r *SourceProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			if peer.Spec.Finding.ParentObject != finding.ParentObject {
 				continue
 			}
-			if peer.Status.Phase == v1alpha1.PhaseSucceeded {
-				continue
-			}
 			peerRank := domain.KindHierarchyRank(peer.Spec.Finding.Kind)
 			if peerRank > thisRank {
 				if r.Log != nil {
@@ -480,6 +478,7 @@ func (r *SourceProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 						zap.String("kind", finding.Kind),
 						zap.String("parentObject", finding.ParentObject),
 						zap.String("supersededBy", peer.Name),
+						zap.String("supersededByPhase", string(peer.Status.Phase)),
 						zap.String("supersededByKind", peer.Spec.Finding.Kind),
 					)
 				}

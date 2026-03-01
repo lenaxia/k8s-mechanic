@@ -30,7 +30,7 @@ case "$_subcmd" in
 esac
 
 if [ "$_blocked_write" = "true" ]; then
-    echo "[KUBECTL] kubectl $* blocked — write operations are not permitted in the mendabot agent" >&2
+    echo "[KUBECTL] kubectl $* blocked — write operations are not permitted in the mechanic-agent" >&2
     exit 1
 fi
 # ─────────────────────────────────────────────────────────────────────────────

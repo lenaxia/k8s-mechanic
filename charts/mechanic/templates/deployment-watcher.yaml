@@ -24,7 +24,7 @@ spec:
       containers:
       - name: watcher
         image: {{ include "mechanic.watcherImage" . }}
-        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        imagePullPolicy: {{ .Values.watcher.image.pullPolicy }}
         env:
         - name: GITOPS_REPO
           value: {{ required "gitops.repo is required" .Values.gitops.repo | quote }}
@@ -35,7 +35,7 @@ spec:
         - name: AGENT_NAMESPACE
           value: {{ .Release.Namespace | quote }}
         - name: AGENT_SA
-          {{- if eq .Values.watcher.agentRBACScope "namespace" }}
+          {{- if eq .Values.agent.rbac.scope "namespace" }}
           value: {{ include "mechanic.agentNSSAName" . | quote }}
           {{- else }}
           value: {{ include "mechanic.agentSAName" . | quote }}
@@ -51,7 +51,7 @@ spec:
         - name: STABILISATION_WINDOW_SECONDS
           value: {{ .Values.watcher.stabilisationWindowSeconds | quote }}
         - name: AGENT_TYPE
-          value: {{ .Values.agentType | quote }}
+          value: {{ .Values.agent.type | quote }}
         - name: LLM_PROVIDER
           value: {{ .Values.watcher.llmProvider | quote }}
         - name: INJECTION_DETECTION_ACTION
@@ -59,10 +59,10 @@ spec:
         - name: MAX_INVESTIGATION_RETRIES
           value: {{ .Values.watcher.maxInvestigationRetries | quote }}
         - name: AGENT_RBAC_SCOPE
-          value: {{ .Values.watcher.agentRBACScope | quote }}
-        {{- if .Values.watcher.agentWatchNamespaces }}
+          value: {{ .Values.agent.rbac.scope | quote }}
+        {{- if .Values.agent.rbac.watchNamespaces }}
         - name: AGENT_WATCH_NAMESPACES
-          value: {{ .Values.watcher.agentWatchNamespaces | quote }}
+          value: {{ .Values.agent.rbac.watchNamespaces | quote }}
         {{- end }}
         {{- if .Values.watcher.watchNamespaces }}
         - name: WATCH_NAMESPACES
@@ -76,34 +76,34 @@ spec:
         - name: DRY_RUN
           value: "true"
         {{- end }}
-        {{- if .Values.agent.hardenKubectl }}
+        {{- if .Values.agent.security.hardening.enabled }}
         - name: HARDEN_AGENT_KUBECTL
           value: "true"
         {{- end }}
-        {{- if .Values.agent.extraRedactPatterns }}
+        {{- if .Values.agent.security.hardening.extraRedactPatterns }}
         - name: EXTRA_REDACT_PATTERNS
-          value: {{ .Values.agent.extraRedactPatterns | join "," | quote }}
+          value: {{ .Values.agent.security.hardening.extraRedactPatterns | join "," | quote }}
         {{- end }}
         - name: CORRELATION_WINDOW_SECONDS
-          value: {{ .Values.watcher.correlationWindowSeconds | quote }}
+          value: {{ .Values.watcher.correlation.windowSeconds | quote }}
         - name: DISABLE_CORRELATION
-          value: {{ .Values.watcher.disableCorrelation | quote }}
+          value: {{ not .Values.watcher.correlation.enabled | quote }}
         - name: CORRELATION_MULTI_POD_THRESHOLD
-          value: {{ .Values.watcher.multiPodThreshold | quote }}
+          value: {{ .Values.watcher.correlation.multiPodThreshold | quote }}
         - name: SELF_REMEDIATION_MAX_DEPTH
-          value: {{ .Values.selfRemediation.maxDepth | quote }}
+          value: {{ .Values.agent.selfRemediation.maxDepth | quote }}
         - name: SELF_REMEDIATION_COOLDOWN_SECONDS
-          value: {{ .Values.selfRemediation.cooldownSeconds | quote }}
+          value: {{ .Values.agent.selfRemediation.cooldownSeconds | quote }}
         - name: MECHANIC_UPSTREAM_REPO
-          value: {{ .Values.selfRemediation.upstreamRepo | quote }}
+          value: ""
         - name: MECHANIC_DISABLE_UPSTREAM_CONTRIBUTIONS
-          value: {{ .Values.selfRemediation.disableUpstreamContributions | quote }}
+          value: "true"
         - name: DISABLE_CASCADE_CHECK
-          value: {{ .Values.selfRemediation.disableCascadeCheck | quote }}
+          value: {{ .Values.agent.selfRemediation.disableCascadeCheck | quote }}
         - name: CASCADE_NAMESPACE_THRESHOLD
-          value: {{ .Values.selfRemediation.cascadeNamespaceThreshold | quote }}
+          value: {{ .Values.agent.selfRemediation.cascadeNamespaceThreshold | quote }}
         - name: CASCADE_NODE_CACHE_TTL_SECONDS
-          value: {{ .Values.selfRemediation.cascadeNodeCacheTTLSeconds | quote }}
+          value: {{ .Values.agent.selfRemediation.cascadeNodeCacheTTLSeconds | quote }}
         - name: PR_AUTO_CLOSE
           value: {{ .Values.watcher.prAutoClose | quote }}
         {{- if .Values.watcher.prAutoClose }}

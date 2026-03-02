@@ -10,8 +10,8 @@ metadata:
     {{- include "mechanic.labels" . | nindent 4 }}
 data:
   core.txt: |
-    {{- if .Values.prompt.coreOverride }}
-    {{- .Values.prompt.coreOverride | nindent 4 }}
+    {{- if .Values.agent.prompt.coreOverride }}
+    {{- .Values.agent.prompt.coreOverride | nindent 4 }}
     {{- else }}
     {{- $content := .Files.Get "files/prompts/core.txt" }}
     {{- if not $content }}
@@ -23,21 +23,21 @@ data:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  # NOTE: This name is derived from agentType: "agent-prompt-<agentType>".
+  # NOTE: This name is derived from agent.type: "agent-prompt-<agent.type>".
   # internal/jobbuilder/job.go constructs this name at runtime using the AGENT_TYPE
-  # env var. The value here must match .Values.agentType exactly.
-  name: agent-prompt-{{ .Values.agentType }}
+  # env var. The value here must match .Values.agent.type exactly.
+  name: agent-prompt-{{ .Values.agent.type }}
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "mechanic.labels" . | nindent 4 }}
 data:
   agent.txt: |
-    {{- if .Values.prompt.agentOverride }}
-    {{- .Values.prompt.agentOverride | nindent 4 }}
+    {{- if .Values.agent.prompt.agentOverride }}
+    {{- .Values.agent.prompt.agentOverride | nindent 4 }}
     {{- else }}
-    {{- $content := .Files.Get (printf "files/prompts/%s.txt" .Values.agentType) }}
+    {{- $content := .Files.Get (printf "files/prompts/%s.txt" .Values.agent.type) }}
     {{- if not $content }}
-    {{- fail (printf "prompt file files/prompts/%s.txt not found in chart" .Values.agentType) }}
+    {{- fail (printf "prompt file files/prompts/%s.txt not found in chart" .Values.agent.type) }}
     {{- end }}
     {{- $content | nindent 4 }}
     {{- end }}

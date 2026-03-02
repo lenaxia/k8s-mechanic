@@ -1,4 +1,4 @@
-{{- if .Values.networkPolicy.enabled }}
+{{- if .Values.agent.security.networkPolicy.enabled }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -22,19 +22,19 @@ spec:
 
   # Kubernetes API server (in-cluster).
   # Port 6443 is the standard kube-apiserver port; some distributions use 443.
-  # Operators on a non-standard port must set networkPolicy.apiServerPort.
+  # Operators on a non-standard port must set agent.security.networkPolicy.apiServerPort.
   - ports:
-    - port: {{ .Values.networkPolicy.apiServerPort }}
+    - port: {{ .Values.agent.security.networkPolicy.apiServerPort }}
       protocol: TCP
 
   # GitHub and LLM API (HTTPS).
   # Cannot restrict by IP without external IP management; port-only restriction.
   # Operators who know their LLM endpoint's CIDR can add an explicit ipBlock rule
-  # via networkPolicy.additionalEgressRules.
+  # via agent.security.networkPolicy.additionalEgressRules.
   - ports:
     - port: 443
       protocol: TCP
-  {{- with .Values.networkPolicy.additionalEgressRules }}
+  {{- with .Values.agent.security.networkPolicy.additionalEgressRules }}
   {{- toYaml . | nindent 2 }}
   {{- end }}
 {{- end }}

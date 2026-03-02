@@ -1,171 +1,204 @@
 # mechanic Helm chart values
 # All fields are optional except gitops.repo and gitops.manifestRoot.
 
-# -- Watcher image repository
-image:
-  # -- Watcher image repository
-  repository: ghcr.io/lenaxia/mechanic-watcher
-  # -- Watcher image tag. Defaults to `Chart.appVersion` when empty.
-  tag: ""
-  # -- Image pull policy
-  pullPolicy: IfNotPresent
+# ── Watcher ───────────────────────────────────────────────────────────────────
 
-# @section Agent image
-agent:
-  image:
-    # -- Agent image repository. Watcher and agent images are always released together — do not pin them to different versions.
-    repository: ghcr.io/lenaxia/mechanic-agent
-    # -- Agent image tag. Defaults to `Chart.appVersion` when empty.
-    tag: ""
-  # -- Resource requests and limits applied to all three agent Job containers
-  # (git-token-clone, dry-run-gate, mendabot-agent).
-  resources:
-    requests:
-      # -- CPU request for each agent Job container.
-      cpu: 100m
-      # -- Memory request for each agent Job container.
-      memory: 128Mi
-    limits:
-      # -- CPU limit for each agent Job container.
-      cpu: 500m
-      # -- Memory limit for each agent Job container.
-      memory: 512Mi
-  # -- When true: blocks kubectl get/describe secret(s), get all, exec, and port-forward
-  # in agent Jobs. Enforced via read-only sentinel file (cannot be bypassed from
-  # within the container). Default: false.
-  hardenKubectl: false
-  # -- Additional RE2 regex patterns applied by both the watcher's finding redaction
-  # and the agent redact binary inside every Job. Invalid patterns cause watcher
-  # startup failure. Default: [] (no extra patterns).
-  # Example:
-  #   extraRedactPatterns:
-  #     - 'CORP-[0-9]{8}'
-  #     - 'INT-[A-Z]+-[0-9]+'
-  extraRedactPatterns: []
-  # Optional Kyverno ClusterPolicy enforcing agent hardening rules:
-  # secret read denial, write denial, pod exec/portforward denial,
-  # agent image allowlist, pod security profile, and a curl-bypass audit rule.
-  #
-  # Requires Kyverno v1.9+ installed in the cluster.
-  # Default: false (Kyverno is not a required dependency).
-  #
-  # If agent.kyvernoPolicy.enabled is true and Kyverno is not installed,
-  # helm install will fail with a CRD-not-found error for kyverno.io/v1/ClusterPolicy.
-  kyvernoPolicy:
-    enabled: false
-    # Image prefix enforced on all mechanic-agent Job containers.
-    # Jobs whose agent container image does not start with this prefix are denied.
-    # Set to "" to disable image enforcement while keeping other rules active.
-    # Override when using a fork, private mirror, or custom build of the agent image.
-    allowedImagePrefix: "ghcr.io/lenaxia/mechanic-agent"
-
-# @section GitOps repository
-gitops:
-  # -- GitHub repository in `org/repo` format (e.g. `"myorg/my-gitops-repo"`). **Required.**
-  repo: ""
-  # -- Path within the repository containing Kubernetes manifests. **Required.**
-  manifestRoot: ""
-
-# @section Watcher operational tuning
 watcher:
-  # -- Seconds to wait after first detecting a failure before creating a RemediationJob. Set to `0` to dispatch immediately.
+  image:
+    # -- Watcher image repository.
+    repository: ghcr.io/lenaxia/mechanic-watcher
+    # -- Watcher image tag. Defaults to Chart.appVersion when empty.
+    tag: ""
+    # -- Image pull policy.
+    pullPolicy: IfNotPresent
+
+  # -- Zap log level. One of debug, info, warn, error.
+  logLevel: info
+
+  # -- Seconds to wait after first detecting a failure before creating a
+  # RemediationJob. Set to 0 to dispatch immediately.
   stabilisationWindowSeconds: 120
+
   # -- Maximum number of agent Jobs running concurrently.
   maxConcurrentJobs: 3
+
   # -- Time-to-live for completed RemediationJob objects in seconds. Default is 7 days.
   remediationJobTTLSeconds: 604800
-  # -- Sink type for PR creation. Currently only `"github"` is supported.
+
+  # -- Sink type for PR creation. Currently only "github" is supported.
   sinkType: github
-  # -- Zap log level. One of `debug`, `info`, `warn`, `error`.
-  logLevel: info
-  # -- LLM readiness gate. Set to `"openai"` to block RemediationJob creation until the `llm-credentials-<agentType>` Secret exists. Leave empty to disable.
+
+  # -- LLM readiness gate. Set to "openai" to block RemediationJob creation until
+  # the llm-credentials-<agent.type> Secret exists. Leave empty to disable.
   llmProvider: "openai"
-  # -- Action when a prompt injection heuristic fires. One of `"log"` (default) or `"suppress"` (silently drops the finding).
+
+  # -- Action when a prompt injection heuristic fires.
+  # One of "log" (default) or "suppress" (silently drops the finding).
   injectionDetectionAction: "log"
+
   # -- Maximum number of investigation retries per RemediationJob before permanently failing.
   maxInvestigationRetries: "3"
-  # -- RBAC scope for the agent Job. One of `"cluster"` (default) or `"namespace"`. When `"namespace"`, `agentWatchNamespaces` must also be set.
-  agentRBACScope: "cluster"
-  # -- Comma-separated list of namespaces for namespace-scoped agent RBAC. Required when `agentRBACScope=namespace`. Example: `"production,staging"`.
-  agentWatchNamespaces: ""
-  # -- Comma-separated list of namespaces the watcher monitors for failures. Empty means all namespaces.
+
+  # -- Comma-separated list of namespaces the watcher monitors for failures.
+  # Empty means all namespaces.
   watchNamespaces: ""
-  # -- Comma-separated list of namespaces the watcher ignores. Empty means no exclusions. Example: `"kube-system,monitoring"`.
+
+  # -- Comma-separated list of namespaces the watcher ignores.
+  # Empty means no exclusions. Example: "kube-system,monitoring".
   excludeNamespaces: ""
-  # -- Enable dry-run shadow mode. When true, write operations are blocked and
-  # investigation reports are stored in RemediationJob.status.message.
+
+  # -- Enable dry-run mode. When true, write operations are blocked and investigation
+  # reports are written to a mechanic-dryrun-<fingerprint> ConfigMap instead of
+  # opening PRs. Useful for validating mechanic behaviour before enabling in production.
   dryRun: false
-  # -- Seconds to hold Pending jobs before dispatching (correlation window). Set to 0 to
-  #    dispatch immediately without correlation. Default is 30.
-  correlationWindowSeconds: 30
-  # -- Disable all correlation logic and dispatch immediately. Default is false.
-  disableCorrelation: false
-  # -- Minimum number of pods failing on the same node to trigger MultiPodSameNodeRule.
-  #    Default is 3.
-  multiPodThreshold: 3
-  # -- Automatically close open GitHub PRs/issues when the underlying finding resolves.
-  #    Set to false to disable auto-close and leave PRs open for manual review.
+
+  # -- Automatically close open GitHub PRs when the underlying finding resolves.
+  # Set to false to leave PRs open for manual review.
   prAutoClose: true
 
-# -- Self-remediation configuration.
-selfRemediation:
-  # -- Maximum self-remediation chain depth. Findings with ChainDepth > maxDepth are suppressed.
-  #    0 disables self-remediation entirely. Default is 2.
-  maxDepth: 2
-  # -- Minimum time between allowed self-remediations. 0 disables circuit breaker.
-  #    Default is 300 (5 minutes).
-  cooldownSeconds: 300
-  # -- Upstream repository for contributions (legacy, unused in current codebase).
-  upstreamRepo: ""
-  # -- Disable upstream contributions (legacy, unused in current codebase).
-  disableUpstreamContributions: false
-  # -- Disable cascade check. Default is false.
-  disableCascadeCheck: false
-  # -- Cascade namespace threshold. Default is 50.
-  cascadeNamespaceThreshold: 50
-  # -- Cascade node cache TTL in seconds. Default is 30.
-  cascadeNodeCacheTTLSeconds: 30
- 
-# -- Agent runner type. Controls which AI agent binary runs inside the Job. Supported values: `"opencode"` (functional), `"claude"` (stub — not yet functional). Each type requires a corresponding Secret named `llm-credentials-<agentType>`. See `NOTES.txt` for the exact `kubectl create secret` commands.
-agentType: opencode
+  # -- Multi-signal correlation. Groups related findings into a single investigation
+  # rather than dispatching one agent Job per finding.
+  correlation:
+    # -- Enable correlation. When false, every finding dispatches immediately.
+    enabled: true
+    # -- Seconds to hold Pending jobs before dispatching (correlation window).
+    windowSeconds: 30
+    # -- Minimum number of pods failing on the same node to trigger MultiPodSameNodeRule.
+    multiPodThreshold: 3
 
-# -- Pre-existing Secrets that must be created before `helm install`. The chart never creates Secret content. Secret names are derived from `agentType` at runtime: `llm-credentials-<agentType>`. Required Secrets: `github-app` (keys: `app-id`, `installation-id`, `private-key`), `llm-credentials-opencode` (key: `provider-config`).
-secrets: {}
+# ── Agent ─────────────────────────────────────────────────────────────────────
 
-# @section Prompt overrides
-prompt:
-  # -- Full core prompt content override. When non-empty, replaces the built-in core prompt mounted from the ConfigMap.
-  coreOverride: ""
-  # -- Full agent-specific prompt content override. When non-empty, replaces the built-in agent prompt for the selected `agentType`.
-  agentOverride: ""
+agent:
+  image:
+    # -- Agent image repository. Watcher and agent images are always released together
+    # — do not pin them to different versions.
+    repository: ghcr.io/lenaxia/mechanic-agent
+    # -- Agent image tag. Defaults to Chart.appVersion when empty.
+    tag: ""
 
-# @section Network policy
-networkPolicy:
-  # -- Enable NetworkPolicy to restrict agent Job egress to the cluster API server, GitHub (`443/tcp`), and the LLM endpoint. Requires a CNI that enforces NetworkPolicy (Cilium, Calico, etc.).
-  enabled: false
-  # -- Port used by the Kubernetes API server. Standard is `6443`; some distributions use `443`.
-  apiServerPort: 6443
-  # -- Optional additional egress rules appended verbatim to the NetworkPolicy spec. Use to restrict the LLM endpoint to a known CIDR.
-  additionalEgressRules: []
+  # -- Agent runner type. Controls which AI agent binary runs inside the Job.
+  # Supported values: "opencode" (functional), "claude" (stub — not yet functional).
+  # Each type requires a corresponding Secret named llm-credentials-<type>.
+  type: opencode
 
-# @section RBAC
-rbac:
-  # -- Create RBAC resources. Set to `false` if you manage RBAC externally.
-  create: true
+  # -- Resource requests and limits applied to all agent Job containers.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
 
-# -- Create `Release.Namespace` if it does not exist. Most operators pre-create namespaces; default is `false`.
+  # -- Investigation prompt overrides. When set, replaces the built-in prompts
+  # mounted from the ConfigMap.
+  prompt:
+    # -- Full core prompt content override.
+    coreOverride: ""
+    # -- Full agent-specific prompt content override for the selected agent type.
+    agentOverride: ""
+
+  # -- RBAC configuration for agent Jobs.
+  rbac:
+    # -- RBAC scope for the agent Job. One of "cluster" (default) or "namespace".
+    # When "namespace", watchNamespaces must also be set.
+    scope: "cluster"
+    # -- Comma-separated list of namespaces the agent is permitted to read when
+    # scope is "namespace". Example: "production,staging".
+    watchNamespaces: ""
+
+  # -- Self-remediation controls. Governs how mechanic handles findings generated
+  # by its own changes (i.e. a PR it opened caused a new failure).
+  selfRemediation:
+    # -- Maximum self-remediation chain depth. Findings with ChainDepth > maxDepth
+    # are suppressed. Set to 0 to disable self-remediation entirely.
+    maxDepth: 2
+    # -- Minimum time in seconds between allowed self-remediations.
+    # Set to 0 to disable the circuit breaker.
+    cooldownSeconds: 300
+    # -- Disable cascade check.
+    disableCascadeCheck: false
+    # -- Number of failing namespaces that triggers a cascade abort.
+    cascadeNamespaceThreshold: 50
+    # -- How long in seconds node failure data is cached for cascade detection.
+    cascadeNodeCacheTTLSeconds: 30
+
+  # -- Security hardening for agent Jobs.
+  security:
+
+    # -- Tool output redaction and kubectl restrictions.
+    hardening:
+      # -- Block kubectl get/describe secret(s), get all, exec, and port-forward
+      # in agent Jobs. Off by default — disabling exec limits the agent's ability
+      # to inspect running containers.
+      enabled: false
+      # -- Additional RE2 regex patterns applied by both the watcher's finding
+      # redaction and the agent redact binary inside every Job. Invalid patterns
+      # cause watcher startup failure.
+      # Example:
+      #   extraRedactPatterns:
+      #     - 'CORP-[0-9]{8}'
+      #     - 'INT-[A-Z]+-[0-9]+'
+      extraRedactPatterns: []
+
+    # -- Optional Kyverno ClusterPolicy enforcing agent hardening rules at the
+    # admission layer: secret read denial, write denial, pod exec/port-forward
+    # denial, agent image allowlist, and pod security profile.
+    # Requires Kyverno v1.9+ installed in the cluster. If enabled and Kyverno is
+    # not installed, helm install will fail with a CRD-not-found error.
+    kyverno:
+      enabled: false
+      # -- Image prefix enforced on all mechanic-agent Job containers.
+      # Jobs whose agent container image does not start with this prefix are denied.
+      # Set to "" to disable image enforcement while keeping other rules active.
+      allowedImagePrefix: "ghcr.io/lenaxia/mechanic-agent"
+
+    # -- NetworkPolicy restricting agent Job egress to the cluster API server,
+    # GitHub (443/tcp), and the LLM endpoint. Requires a CNI that enforces
+    # NetworkPolicy (Cilium, Calico, etc.).
+    networkPolicy:
+      enabled: false
+      # -- Port used by the Kubernetes API server.
+      # Standard is 6443; some distributions use 443.
+      apiServerPort: 6443
+      # -- Optional additional egress rules appended verbatim to the NetworkPolicy
+      # spec. Use to restrict the LLM endpoint to a known CIDR.
+      additionalEgressRules: []
+
+# ── GitOps repository ─────────────────────────────────────────────────────────
+
+gitops:
+  # -- GitHub repository in org/repo format (e.g. "myorg/my-gitops-repo"). Required.
+  repo: ""
+  # -- Path within the repository containing Kubernetes manifests. Required.
+  manifestRoot: ""
+
+# ── Global ────────────────────────────────────────────────────────────────────
+
+# -- Create Release.Namespace if it does not exist.
+# Most operators pre-create namespaces; default is false.
 createNamespace: false
 
-# @section Metrics
+# -- RBAC for the watcher Deployment and agent Jobs.
+rbac:
+  # -- Create RBAC resources. Set to false if you manage RBAC externally.
+  create: true
+
+# -- Prometheus metrics for the watcher Deployment.
 metrics:
-  # -- Expose a metrics Service on port `8080`. Required for ServiceMonitor.
+  # -- Expose a metrics Service on port 8080.
   enabled: false
   serviceMonitor:
-    # -- Create a Prometheus Operator `ServiceMonitor` CR. Requires `metrics.enabled: true` and Prometheus Operator installed.
+    # -- Create a Prometheus Operator ServiceMonitor CR.
+    # Requires metrics.enabled: true and Prometheus Operator installed.
     enabled: false
-    # -- Prometheus scrape interval.
     interval: 30s
-    # -- Prometheus scrape timeout.
     scrapeTimeout: 10s
-    # -- Additional labels to add to the ServiceMonitor (e.g. for a Prometheus label selector).
+    # -- Additional labels for the ServiceMonitor (e.g. for a Prometheus label selector).
     labels: {}
+
+# -- Pre-existing Secrets that must be created before helm install.
+# The chart never creates Secret content.
+# Required: github-app (keys: app-id, installation-id, private-key)
+#           llm-credentials-<agent.type> (key: provider-config)
+secrets: {}

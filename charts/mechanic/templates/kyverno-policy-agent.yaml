@@ -1,4 +1,4 @@
-{{- if .Values.agent.kyvernoPolicy.enabled }}
+{{- if .Values.agent.security.kyverno.enabled }}
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
 metadata:
@@ -82,7 +82,7 @@ spec:
           - key: "{{ "{{" }} request.operation {{ "}}" }}"
             operator: AnyIn
             value: ["CREATE", "UPDATE", "PATCH", "DELETE", "DELETECOLLECTION"]
-{{- if .Values.agent.kyvernoPolicy.allowedImagePrefix }}
+{{- if .Values.agent.security.kyverno.allowedImagePrefix }}
   - name: restrict-agent-image
     match:
       any:
@@ -101,7 +101,7 @@ spec:
             spec:
               containers:
               - name: mechanic-agent
-                image: "{{ .Values.agent.kyvernoPolicy.allowedImagePrefix }}*"
+                image: "{{ .Values.agent.security.kyverno.allowedImagePrefix }}*"
 {{- end }}
   - name: enforce-agent-readonly-root
     match:

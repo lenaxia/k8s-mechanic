@@ -54,7 +54,7 @@ Agent ServiceAccount name.
 {{- end }}
 
 {{/*
-Namespace-scoped agent ServiceAccount name (used when watcher.agentRBACScope=namespace).
+Namespace-scoped agent ServiceAccount name (used when agent.rbac.scope=namespace).
 */}}
 {{- define "mechanic.agentNSSAName" -}}
 {{- printf "%s-agent-ns" (include "mechanic.fullname" .) | trunc 63 | trimSuffix "-" }}
@@ -62,11 +62,11 @@ Namespace-scoped agent ServiceAccount name (used when watcher.agentRBACScope=nam
 
 {{/*
 Watcher container image (repository:tag).
-Falls back to Chart.AppVersion when image.tag is empty.
+Falls back to Chart.AppVersion when watcher.image.tag is empty.
 */}}
 {{- define "mechanic.watcherImage" -}}
-{{- $tag := .Values.image.tag | default .Chart.AppVersion }}
-{{- printf "%s:%s" .Values.image.repository $tag }}
+{{- $tag := .Values.watcher.image.tag | default .Chart.AppVersion }}
+{{- printf "%s:%s" .Values.watcher.image.repository $tag }}
 {{- end }}
 
 {{/*

@@ -3,35 +3,7 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "agentType": {
-      "type": "string",
-      "enum": [
-        "opencode",
-        "claude"
-      ],
-      "description": "Agent runner type. Controls which AI agent binary runs inside the Job."
-    },
-    "image": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "repository": {
-          "type": "string"
-        },
-        "tag": {
-          "type": "string"
-        },
-        "pullPolicy": {
-          "type": "string",
-          "enum": [
-            "Always",
-            "IfNotPresent",
-            "Never"
-          ]
-        }
-      }
-    },
-    "agent": {
+    "watcher": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -39,88 +11,18 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "repository": {
-              "type": "string"
-            },
-            "tag": {
-              "type": "string"
-            }
-          }
-        },
-        "resources": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "requests": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "cpu": {
-                  "type": "string"
-                },
-                "memory": {
-                  "type": "string"
-                }
-              }
-            },
-            "limits": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "cpu": {
-                  "type": "string"
-                },
-                "memory": {
-                  "type": "string"
-                }
-              }
-            }
-          }
-        },
-        "hardenKubectl": {
-          "type": "boolean",
-          "description": "When true: blocks kubectl get/describe secret(s), get all, exec, and port-forward in agent Jobs."
-        },
-        "extraRedactPatterns": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "Additional RE2 regex patterns applied by the watcher and agent redact binary."
-        },
-        "kyvernoPolicy": {
-          "type": "object",
-          "additionalProperties": false,
-          "description": "Optional Kyverno ClusterPolicy for agent hardening. Requires Kyverno v1.9+.",
-          "properties": {
-            "enabled": {
-              "type": "boolean",
-              "description": "Enable the Kyverno ClusterPolicy. Default: false."
-            },
-            "allowedImagePrefix": {
+            "repository": { "type": "string" },
+            "tag": { "type": "string" },
+            "pullPolicy": {
               "type": "string",
-              "description": "Image prefix enforced on mechanic-agent Job containers. Empty disables image enforcement."
+              "enum": ["Always", "IfNotPresent", "Never"]
             }
           }
-        }
-      }
-    },
-    "gitops": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "repo": {
-          "type": "string"
         },
-        "manifestRoot": {
-          "type": "string"
-        }
-      }
-    },
-    "watcher": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
+        "logLevel": {
+          "type": "string",
+          "enum": ["debug", "info", "warn", "error"]
+        },
         "stabilisationWindowSeconds": {
           "type": "integer",
           "minimum": 0
@@ -136,40 +38,18 @@
         "sinkType": {
           "type": "string"
         },
-        "logLevel": {
-          "type": "string",
-          "enum": [
-            "debug",
-            "info",
-            "warn",
-            "error"
-          ]
-        },
         "llmProvider": {
           "type": "string",
-          "enum": [
-            "",
-            "openai"
-          ],
+          "enum": ["", "openai"],
           "description": "LLM readiness gate. 'openai' enables it; empty disables."
         },
         "injectionDetectionAction": {
           "type": "string",
-          "enum": [
-            "log",
-            "suppress"
-          ]
+          "enum": ["log", "suppress"]
         },
-        "agentRBACScope": {
+        "maxInvestigationRetries": {
           "type": "string",
-          "enum": [
-            "cluster",
-            "namespace"
-          ]
-        },
-        "agentWatchNamespaces": {
-          "type": "string",
-          "description": "Comma-separated namespaces. Required when agentRBACScope=namespace."
+          "description": "Maximum investigation retries per RemediationJob before permanently failing."
         },
         "watchNamespaces": {
           "type": "string",
@@ -179,116 +59,219 @@
           "type": "string",
           "description": "Comma-separated namespaces the watcher ignores. Empty = no exclusions."
         },
-        "maxInvestigationRetries": {
-          "type": "string",
-          "description": "Maximum investigation retries per RemediationJob before permanently failing."
-        },
         "dryRun": {
           "type": "boolean",
-          "description": "Enable dry-run shadow mode. Blocks write operations; stores investigation reports in RemediationJob.status.message."
-        },
-        "disableCorrelation": {
-          "type": "boolean",
-          "description": "Disable Epic 13 multi-signal correlation. Default is false (correlation enabled)."
-        },
-        "correlationWindowSeconds": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Time window for correlation detection. Findings within this window are considered related."
-        },
-        "multiPodThreshold": {
-          "type": "integer",
-          "minimum": 1,
-          "description": "Minimum number of pods failing on the same node to trigger MultiPodSameNodeRule."
+          "description": "Enable dry-run mode. Blocks write operations; stores investigation reports in a ConfigMap."
         },
         "prAutoClose": {
           "type": "boolean",
-          "description": "Automatically close open GitHub PRs/issues when the underlying finding resolves."
+          "description": "Automatically close open GitHub PRs when the underlying finding resolves."
+        },
+        "correlation": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Enable multi-signal correlation. When false, every finding dispatches immediately."
+            },
+            "windowSeconds": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Seconds to hold Pending jobs before dispatching (correlation window)."
+            },
+            "multiPodThreshold": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Minimum number of pods failing on the same node to trigger MultiPodSameNodeRule."
+            }
+          }
         }
       }
     },
-    "prompt": {
+    "agent": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "coreOverride": {
-          "type": "string"
+        "image": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "repository": { "type": "string" },
+            "tag": { "type": "string" }
+          }
         },
-        "agentOverride": {
-          "type": "string"
+        "type": {
+          "type": "string",
+          "enum": ["opencode", "claude"],
+          "description": "Agent runner type. Controls which AI agent binary runs inside the Job."
+        },
+        "resources": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "requests": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "cpu": { "type": "string" },
+                "memory": { "type": "string" }
+              }
+            },
+            "limits": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "cpu": { "type": "string" },
+                "memory": { "type": "string" }
+              }
+            }
+          }
+        },
+        "rbac": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "scope": {
+              "type": "string",
+              "enum": ["cluster", "namespace"],
+              "description": "RBAC scope for the agent Job. When 'namespace', watchNamespaces must also be set."
+            },
+            "watchNamespaces": {
+              "type": "string",
+              "description": "Comma-separated namespaces the agent is permitted to read when scope is 'namespace'."
+            }
+          }
+        },
+        "prompt": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "coreOverride": {
+              "type": "string",
+              "description": "Full core prompt content override."
+            },
+            "agentOverride": {
+              "type": "string",
+              "description": "Full agent-specific prompt content override for the selected agent type."
+            }
+          }
+        },
+        "selfRemediation": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "maxDepth": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10,
+              "description": "Maximum self-remediation chain depth. 0 disables self-remediation."
+            },
+            "cooldownSeconds": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 3600,
+              "description": "Minimum time between allowed self-remediations in seconds. 0 disables circuit breaker."
+            },
+            "disableCascadeCheck": {
+              "type": "boolean",
+              "description": "Disable cascade check."
+            },
+            "cascadeNamespaceThreshold": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Number of failing namespaces that triggers a cascade abort."
+            },
+            "cascadeNodeCacheTTLSeconds": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "How long in seconds node failure data is cached for cascade detection."
+            }
+          }
+        },
+        "security": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "hardening": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "description": "Block kubectl get/describe secret(s), get all, exec, and port-forward in agent Jobs."
+                },
+                "extraRedactPatterns": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "description": "Additional RE2 regex patterns applied by the watcher and agent redact binary."
+                }
+              }
+            },
+            "kyverno": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Optional Kyverno ClusterPolicy enforcing agent hardening rules. Requires Kyverno v1.9+.",
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "description": "Enable the Kyverno ClusterPolicy. Default: false."
+                },
+                "allowedImagePrefix": {
+                  "type": "string",
+                  "description": "Image prefix enforced on mechanic-agent Job containers. Empty disables image enforcement."
+                }
+              }
+            },
+            "networkPolicy": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "NetworkPolicy restricting agent Job egress. Requires a CNI that enforces NetworkPolicy.",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "apiServerPort": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 65535,
+                  "description": "Port used by the Kubernetes API server. Standard is 6443."
+                },
+                "additionalEgressRules": {
+                  "type": "array",
+                  "description": "Optional additional egress rules appended verbatim to the NetworkPolicy spec."
+                }
+              }
+            }
+          }
         }
       }
     },
-    "networkPolicy": {
+    "gitops": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "enabled": {
-          "type": "boolean"
+        "repo": {
+          "type": "string",
+          "description": "GitHub repository in org/repo format. Required."
         },
-        "apiServerPort": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 65535
-        },
-        "additionalEgressRules": {
-          "type": "array"
+        "manifestRoot": {
+          "type": "string",
+          "description": "Path within the repository containing Kubernetes manifests. Required."
         }
       }
+    },
+    "createNamespace": {
+      "type": "boolean",
+      "description": "Create Release.Namespace if it does not exist."
     },
     "rbac": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "create": {
-          "type": "boolean"
-        }
-      }
-    },
-    "secrets": {
-      "type": "object",
-      "description": "Placeholder \u2014 no configurable fields; secret names are derived from agentType in job.go"
-    },
-    "createNamespace": {
-      "type": "boolean"
-    },
-    "selfRemediation": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "maxDepth": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 10,
-          "description": "Maximum self-remediation chain depth. 0 disables self-remediation."
-        },
-        "cooldownSeconds": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 3600,
-          "description": "Minimum time between allowed self-remediations in seconds. 0 disables circuit breaker."
-        },
-        "upstreamRepo": {
-          "type": "string",
-          "description": "Upstream repository for contributions (legacy, unused)."
-        },
-        "disableUpstreamContributions": {
           "type": "boolean",
-          "description": "Disable upstream contributions (legacy, unused)."
-        },
-        "disableCascadeCheck": {
-          "type": "boolean",
-          "description": "Disable cascade check."
-        },
-        "cascadeNamespaceThreshold": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Cascade namespace threshold."
-        },
-        "cascadeNodeCacheTTLSeconds": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Cascade node cache TTL in seconds."
+          "description": "Create RBAC resources. Set to false if you manage RBAC externally."
         }
       }
     },
@@ -297,27 +280,30 @@
       "additionalProperties": false,
       "properties": {
         "enabled": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Expose a metrics Service on port 8080."
         },
         "serviceMonitor": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
             "enabled": {
-              "type": "boolean"
+              "type": "boolean",
+              "description": "Create a Prometheus Operator ServiceMonitor CR."
             },
-            "interval": {
-              "type": "string"
-            },
-            "scrapeTimeout": {
-              "type": "string"
-            },
+            "interval": { "type": "string" },
+            "scrapeTimeout": { "type": "string" },
             "labels": {
-              "type": "object"
+              "type": "object",
+              "description": "Additional labels for the ServiceMonitor."
             }
           }
         }
       }
+    },
+    "secrets": {
+      "type": "object",
+      "description": "Placeholder — no configurable fields; the chart never creates Secret content."
     }
   }
 }

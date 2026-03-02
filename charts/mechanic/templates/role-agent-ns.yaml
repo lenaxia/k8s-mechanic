@@ -1,6 +1,6 @@
-{{- if and .Values.rbac.create (eq .Values.watcher.agentRBACScope "namespace") }}
+{{- if and .Values.rbac.create (eq .Values.agent.rbac.scope "namespace") }}
 {{- $root := . }}
-{{- range $ns := splitList "," .Values.watcher.agentWatchNamespaces }}
+{{- range $ns := splitList "," .Values.agent.rbac.watchNamespaces }}
 {{- if $ns }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1

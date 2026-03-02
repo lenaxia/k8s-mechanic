@@ -296,6 +296,16 @@ provider directory in the OpenCode docs:
 ### 2. Install with Helm
 
 ```sh
+helm install mechanic oci://ghcr.io/lenaxia/charts/mechanic \
+  --namespace mechanic \
+  --create-namespace \
+  --set gitops.repo=myorg/my-gitops-repo \
+  --set gitops.manifestRoot=kubernetes
+```
+
+Or from a local clone:
+
+```sh
 helm install mechanic charts/mechanic/ \
   --namespace mechanic \
   --set gitops.repo=myorg/my-gitops-repo \

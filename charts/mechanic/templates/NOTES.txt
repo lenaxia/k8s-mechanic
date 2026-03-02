@@ -60,3 +60,6 @@ cluster, otherwise the ServiceMonitor resource will be ignored.
 {{- end }}
 
 For documentation see https://github.com/lenaxia/k8s-mechanic
+
+To upgrade to a newer version:
+  helm upgrade mechanic oci://ghcr.io/lenaxia/charts/mechanic --namespace {{ .Release.Namespace }}

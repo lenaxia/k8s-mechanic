@@ -134,22 +134,14 @@ exposed to the main agent container.
 #### Hardened mode
 
 Hardened mode (`agent.hardenKubectl: true` in `values.yaml`, on by default) activates
-a layered set of controls inside the agent container that limit what the LLM can do
-even if it receives adversarial instructions.
-
-**How it is activated**
-
-The jobbuilder writes a sentinel file (`/mechanic-cfg/harden-kubectl: true`) into a
-read-only `emptyDir` volume before the main container starts. All controls inside the
-container read this file — not an environment variable — so the agent process cannot
-disable hardening by modifying its own environment.
+a layered set of controls inside the agent container.
 
 **Controls active in hardened mode**
 
 | Control | What it blocks / does |
 |---|---|
-| **kubectl write blocking** | `apply`, `create`, `delete`, `edit`, `patch`, `replace`, `scale`, `label`, `annotate`, `taint`, `drain`, `cordon`, `uncordon`, `rollout restart/undo` — all exit 1 unconditionally. The agent can never modify the cluster directly, regardless of instructions. |
-| **kubectl secret blocking** | `get secret(s)`, `describe secret(s)`, `get all`, `exec`, and `port-forward` are also blocked in hardened mode. Kubernetes Secrets never reach the LLM context via `kubectl`. |
+| **kubectl write blocking** | `apply`, `create`, `delete`, `edit`, `patch`, `replace`, `scale`, `label`, `annotate`, `taint`, `drain`, `cordon`, `uncordon`, `rollout restart/undo` — all exit 1 unconditionally. All cluster changes go through Git and your GitOps reconciler. |
+| **kubectl secret blocking** | `get secret(s)`, `describe secret(s)`, `get all`, `exec`, and `port-forward` are blocked. Kubernetes Secrets never reach the LLM context via `kubectl`. |
 | **kubectl output redaction** | All remaining `kubectl` output is piped through the `redact` binary before it reaches the LLM. Any value matching a known secret pattern (`base64 ≥ 40 chars`, `password=…`, `token=…`, etc.) is replaced with `[REDACTED]`. The wrapper hard-fails if `redact` is missing, preventing silent unredacted output. |
 | **helm output redaction** | `helm get values`, `helm get secret`, and all other `helm` subcommands have their stdout and stderr piped through `redact` before reaching the LLM context. |
 | **Tool output redaction (all wrapped tools)** | `flux`, `sops`, `talosctl`, `yq`, `stern`, `kubeconform`, `kustomize`, `age`, `age-keygen`, and `gh` all have PATH-shadowing wrapper scripts that capture output and pipe it through `redact` before returning to the caller. The wrappers fail closed — if the `redact` binary is absent the tool exits 1 rather than leaking unredacted output. |

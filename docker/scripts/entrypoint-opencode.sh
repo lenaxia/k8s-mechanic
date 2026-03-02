@@ -15,9 +15,18 @@ source /usr/local/bin/entrypoint-common.sh
 grep -qxF 'export KUBECONFIG=/home/agent/.kube/config' /home/agent/.bashrc  2>/dev/null || echo "export KUBECONFIG=/home/agent/.kube/config" >> /home/agent/.bashrc
 grep -qxF 'export KUBECONFIG=/home/agent/.kube/config' /home/agent/.profile 2>/dev/null || echo "export KUBECONFIG=/home/agent/.kube/config" >> /home/agent/.profile
 
-# Pass the opaque provider config blob to opencode via its environment variable.
-# The operator is responsible for the content — mechanic does not interpret it.
-export OPENCODE_CONFIG_CONTENT="$AGENT_PROVIDER_CONFIG"
+# Write the provider config blob to a file in /tmp and point opencode at it via
+# OPENCODE_CONFIG. This keeps the LLM API key out of the process environment:
+# if the agent runs `env`, it will not see the key embedded in AGENT_PROVIDER_CONFIG.
+#
+# /tmp is an emptyDir volume mounted by the jobbuilder — it is writable even under
+# ReadOnlyRootFilesystem=true and disappears when the pod is deleted.
+#
+# After writing the file, unset AGENT_PROVIDER_CONFIG so it is absent from the
+# environment of all child processes (including opencode and any shell tools it spawns).
+printf '%s' "$AGENT_PROVIDER_CONFIG" > /tmp/opencode-config.json
+export OPENCODE_CONFIG=/tmp/opencode-config.json
+unset AGENT_PROVIDER_CONFIG
 
 # Determine dry-run mode using the same three-layer logic as the wrappers.
 # Checking only $DRY_RUN here (Layer 3) would create an inconsistency: a

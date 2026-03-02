@@ -58,23 +58,39 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # trivy-action is pinned to 0.31.0 (76071ef0d7ec797419534a183b498b4d6366cf37).
-      # DO NOT bump past 0.31.0 without testing on a tag-triggered run first.
+      # Install trivy from GitHub Releases with SHA256 verification.
       #
-      # Background: 0.34.0 introduced aquasecurity/setup-trivy as an internal
-      # dependency. setup-trivy does a sparse actions/checkout of the upstream
-      # trivy repo to fetch contrib scripts. That checkout fails on tag-triggered
-      # runs because the runner's default GITHUB_TOKEN hits API rate limits on the
-      # secondary repo fetch. The scan never executes and the job exits 1.
+      # We do NOT use aquasecurity/trivy-action's built-in setup (skip-setup-trivy: true
+      # below) because trivy-action >= 0.29.0 delegates installation to
+      # aquasecurity/setup-trivy, which does a sparse git clone of the upstream trivy
+      # repo on every run to fetch contrib scripts. That clone fails on tag-triggered
+      # runs because the runner's GITHUB_TOKEN hits secondary-repo API rate limits.
+      # The action exits 1 before the scan ever starts.
       #
-      # To re-evaluate a newer version:
-      # 1. Create a test branch and bump the pin below.
-      # 2. Push a test tag (e.g. v0.0.0-ci-test) to that branch.
-      # 3. Confirm the "Scan agent image for CVEs" step produces actual trivy
-      #    output (not an immediate exit 1 from setup-trivy failing).
-      # 4. Only then update this pin in main.
+      # Upstream tags are mutable — "rolling back" to an older trivy-action tag is not
+      # safe because aquasecurity retroactively force-pushes updated commits onto old
+      # tags. Every historical tag now contains the broken setup-trivy dependency.
+      #
+      # The correct fix (setup-trivy's own documented migration path) is:
+      #   1. Install trivy ourselves with a pinned, checksum-verified binary.
+      #   2. Pass skip-setup-trivy: true so trivy-action uses the binary we installed.
+      #
+      # To update the trivy version:
+      #   1. Download the new checksums.txt from the trivy GitHub release.
+      #   2. Replace TRIVY_VERSION and TRIVY_SHA256 below with the new values.
+      #   3. Update the trivyignore expiry comment in .trivyignore if needed.
       #
       # renovate: ignore
+      - name: Install Trivy
+        env:
+          TRIVY_VERSION: "0.69.2"
+          TRIVY_SHA256: "affa59a1e37d86e4b8ab2cd02f0ab2e63d22f1bf9cf6a7aa326c884e25e26ce3"
+        run: |
+          curl -fsSLO "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          echo "${TRIVY_SHA256}  trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" | sha256sum --check --strict
+          tar -xzf "trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" trivy
+          sudo install -m 0755 trivy /usr/local/bin/trivy
+
       - name: Scan agent image for CVEs
         uses: aquasecurity/trivy-action@e368e328979b113139d6f9068e03accaed98a518 # 0.34.1
         with:
@@ -84,6 +100,7 @@ jobs:
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           trivyignores: .trivyignore
+          skip-setup-trivy: true
 
       - name: Smoke test
         run: |

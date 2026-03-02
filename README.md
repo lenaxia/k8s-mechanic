@@ -133,40 +133,29 @@ exposed to the main agent container.
 
 #### Hardened mode
 
-Hardened mode (`agent.hardenKubectl: true` in `values.yaml`, on by default) activates
-a layered set of controls inside the agent container.
+Hardened mode (`agent.hardenKubectl: true` in `values.yaml`, on by default) adds
+additional read restrictions on top of the always-on defaults below.
 
-**Controls active in hardened mode**
+**Always on (regardless of hardened mode)**
 
-| Control | What it blocks / does |
+| Control | What it does |
 |---|---|
-| **kubectl write blocking** | `apply`, `create`, `delete`, `edit`, `patch`, `replace`, `scale`, `label`, `annotate`, `taint`, `drain`, `cordon`, `uncordon`, `rollout restart/undo` — all exit 1 unconditionally. All cluster changes go through Git and your GitOps reconciler. |
-| **kubectl secret blocking** | `get secret(s)`, `describe secret(s)`, `get all`, `exec`, and `port-forward` are blocked. Kubernetes Secrets never reach the LLM context via `kubectl`. |
-| **kubectl output redaction** | All remaining `kubectl` output is piped through the `redact` binary before it reaches the LLM. Any value matching a known secret pattern (`base64 ≥ 40 chars`, `password=…`, `token=…`, etc.) is replaced with `[REDACTED]`. The wrapper hard-fails if `redact` is missing, preventing silent unredacted output. |
-| **helm output redaction** | `helm get values`, `helm get secret`, and all other `helm` subcommands have their stdout and stderr piped through `redact` before reaching the LLM context. |
-| **Tool output redaction (all wrapped tools)** | `flux`, `sops`, `talosctl`, `yq`, `stern`, `kubeconform`, `kustomize`, `age`, `age-keygen`, and `gh` all have PATH-shadowing wrapper scripts that capture output and pipe it through `redact` before returning to the caller. The wrappers fail closed — if the `redact` binary is absent the tool exits 1 rather than leaking unredacted output. |
-| **gh dry-run blocking** | In dry-run mode, `gh` is restricted to a read-only allowlist (`api GET`, `auth status`, `repo view`, `pr view/list/checks/diff`, `issue view/list`). All write operations (`pr create`, `pr edit`, `issue create`, etc.) are blocked. Outside dry-run mode, `gh` output is still piped through `redact`. |
-| **git write blocking** | In dry-run mode, `git push`, `git commit`, `git reset`, `git rebase`, `git clean`, and `git remote set-url` are all blocked. The agent cannot push to the GitOps repo during a dry-run validation. |
-| **No secrets in environment variables** | No credentials or API keys are present in the agent process environment. All secret material is written to files before the agent starts and removed from the environment entirely. A full `env` dump by the LLM reveals no credentials. |
+| **kubectl write blocking** | `apply`, `create`, `delete`, `edit`, `patch`, `replace`, `scale`, `label`, `annotate`, `taint`, `drain`, `cordon`, `uncordon`, `rollout restart/undo` — all exit 1. All cluster changes go through Git and your GitOps reconciler. |
+| **kubectl output redaction** | All `kubectl` output is piped through the `redact` binary. Any value matching a known secret pattern (`base64 ≥ 40 chars`, `password=…`, `token=…`, etc.) is replaced with `[REDACTED]`. The wrapper hard-fails if `redact` is missing. |
+| **Tool output redaction** | `helm`, `flux`, `sops`, `talosctl`, `yq`, `stern`, `kubeconform`, `kustomize`, `age`, `age-keygen`, and `gh` all have PATH-shadowing wrappers that pipe output through `redact`. Wrappers fail closed — if the `redact` binary is absent the tool exits 1. |
+| **No secrets in environment variables** | No credentials or API keys are present in the agent process environment. All secret material is written to files before the agent starts and removed from the environment entirely. |
 
-**Three-layer detection**
+**Hardened mode only**
 
-Every hardened wrapper uses the same tamper-resistant detection order:
-
-1. **Sentinel file** (`/mechanic-cfg/harden-kubectl`) — a read-only file written by an
-   init container before the main container starts. Cannot be modified by the agent process.
-2. **`/proc/1/environ`** — reads the immutable container-init environment directly from
-   procfs. Survives any `unset` the agent might attempt.
-3. **`$HARDEN_KUBECTL` env var** — fallback for local testing outside Kubernetes.
-
-All three must agree for the mode to be considered disabled. A single layer firing is
-sufficient to activate hardening.
+| Control | What it adds |
+|---|---|
+| **kubectl secret blocking** | `get secret(s)`, `describe secret(s)`, and `get all` are blocked. Kubernetes Secrets never reach the LLM context via `kubectl`. |
+| **kubectl exec / port-forward blocking** | `exec` and `port-forward` are blocked. The agent cannot open interactive sessions or forward ports to cluster workloads. |
 
 **Exfiltration testing**
 
-The security controls are validated in regular adversarial red-team runs (Phase 11
-of the security process) using a willing adversarial agent with all prompt protections
-removed. Results and the full exfiltration leak registry are in
+The security controls are validated in regular red-team runs (Phase 11 of the security
+process). Results and the full exfiltration leak registry are in
 [`docs/SECURITY/EXFIL_LEAK_REGISTRY.md`](docs/SECURITY/EXFIL_LEAK_REGISTRY.md).
 
 ## Quick Start

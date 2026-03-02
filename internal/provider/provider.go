@@ -20,6 +20,7 @@ import (
 	"github.com/lenaxia/k8s-mechanic/internal/circuitbreaker"
 	"github.com/lenaxia/k8s-mechanic/internal/config"
 	"github.com/lenaxia/k8s-mechanic/internal/domain"
+	"github.com/lenaxia/k8s-mechanic/internal/metrics"
 	"github.com/lenaxia/k8s-mechanic/internal/readiness"
 )
 
@@ -198,6 +199,7 @@ func (r *SourceProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			)
 		}
 		if r.Cfg.InjectionDetectionAction == "suppress" {
+			metrics.RecordSuppressed(metrics.ReasonInjectionDetected)
 			return ctrl.Result{}, nil
 		}
 	}
@@ -214,6 +216,7 @@ func (r *SourceProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			)
 		}
 		if r.Cfg.InjectionDetectionAction == "suppress" {
+			metrics.RecordSuppressed(metrics.ReasonInjectionDetected)
 			return ctrl.Result{}, nil
 		}
 	}
@@ -286,6 +289,7 @@ func (r *SourceProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 				zap.String("minSeverity", string(minSeverity)),
 			)
 		}
+		metrics.RecordSuppressed(metrics.ReasonMinSeverity)
 		return ctrl.Result{}, nil
 	}
 
@@ -306,6 +310,7 @@ func (r *SourceProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 					zap.Int("maxDepth", maxDepth),
 				)
 			}
+			metrics.RecordSuppressed(metrics.ReasonSelfRemediationDepth)
 			return ctrl.Result{}, nil
 		}
 
@@ -324,6 +329,8 @@ func (r *SourceProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 						zap.Duration("remaining", remaining),
 					)
 				}
+				metrics.RecordSuppressed(metrics.ReasonCircuitBreaker)
+				metrics.RecordCircuitBreakerActivation()
 				return ctrl.Result{RequeueAfter: remaining}, nil
 			}
 		}
@@ -376,6 +383,7 @@ func (r *SourceProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 					zap.Duration("window", r.Cfg.StabilisationWindow),
 				)
 			}
+			metrics.RecordSuppressed(metrics.ReasonStabilisationWindow)
 			return ctrl.Result{RequeueAfter: r.Cfg.StabilisationWindow}, nil
 		} else {
 			elapsed := time.Since(first)
@@ -391,6 +399,7 @@ func (r *SourceProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 						zap.Duration("remaining", remaining),
 					)
 				}
+				metrics.RecordSuppressed(metrics.ReasonStabilisationWindow)
 				return ctrl.Result{RequeueAfter: remaining}, nil
 			}
 		}
@@ -422,6 +431,7 @@ func (r *SourceProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			if r.EventRecorder != nil {
 				r.EventRecorder.Eventf(obj, corev1.EventTypeWarning, "RemediationJobPermanentlyFailed", "RemediationJob %s is permanently failed after %d retries", rjob.Name, rjob.Status.RetryCount)
 			}
+			metrics.RecordSuppressed(metrics.ReasonPermanentlyFailed)
 			return ctrl.Result{}, nil
 		case v1alpha1.PhaseFailed:
 			if delErr := r.Delete(ctx, rjob); delErr != nil && !apierrors.IsNotFound(delErr) {
@@ -454,6 +464,7 @@ func (r *SourceProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 				if r.EventRecorder != nil {
 					r.EventRecorder.Eventf(obj, corev1.EventTypeNormal, "DuplicateFingerprint", "Existing RemediationJob %s already covers this finding (PR merged)", rjob.Name)
 				}
+				metrics.RecordSuppressed(metrics.ReasonDuplicate)
 				return ctrl.Result{}, nil
 			}
 
@@ -498,6 +509,7 @@ func (r *SourceProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 					if r.EventRecorder != nil {
 						r.EventRecorder.Eventf(obj, corev1.EventTypeNormal, "DuplicateFingerprint", "Existing RemediationJob %s already covers this finding (PR just merged)", rjob.Name)
 					}
+					metrics.RecordSuppressed(metrics.ReasonDuplicate)
 					return ctrl.Result{}, nil
 				}
 			}
@@ -524,6 +536,7 @@ func (r *SourceProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 				if r.EventRecorder != nil {
 					r.EventRecorder.Eventf(obj, corev1.EventTypeNormal, "DuplicateFingerprint", "Existing RemediationJob %s already covers this finding (within short TTL)", rjob.Name)
 				}
+				metrics.RecordSuppressed(metrics.ReasonDuplicate)
 				return ctrl.Result{}, nil
 			}
 			// Short TTL elapsed and PR not merged — delete the tombstone to make
@@ -558,6 +571,7 @@ func (r *SourceProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			if r.EventRecorder != nil {
 				r.EventRecorder.Eventf(obj, corev1.EventTypeNormal, "DuplicateFingerprint", "Existing RemediationJob %s already covers this finding", rjob.Name)
 			}
+			metrics.RecordSuppressed(metrics.ReasonDuplicate)
 			return ctrl.Result{}, nil
 		}
 	}
@@ -603,6 +617,7 @@ func (r *SourceProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 						zap.String("supersededByKind", peer.Spec.Finding.Kind),
 					)
 				}
+				metrics.RecordSuppressed(metrics.ReasonParentHierarchy)
 				return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 			}
 		}
@@ -705,6 +720,7 @@ func (r *SourceProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			zap.String("remediationJob", rjob.Name),
 		)
 	}
+	metrics.RecordDispatched(finding.Kind, string(finding.Severity))
 	if r.EventRecorder != nil {
 		r.EventRecorder.Eventf(obj, corev1.EventTypeNormal, "FindingDetected", "Provider %s detected %s/%s in namespace %s", r.Provider.ProviderName(), finding.Kind, finding.Name, finding.Namespace)
 	}

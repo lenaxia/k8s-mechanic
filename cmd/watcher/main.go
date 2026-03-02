@@ -230,9 +230,9 @@ func main() {
 			logger.Fatal("GITHUB_APP_INSTALLATION_ID is missing or invalid; cannot start with PR_AUTO_CLOSE=true",
 				zap.Error(err))
 		}
-		privKeyPEM, err := os.ReadFile("/var/run/secrets/mendabot/github-app-private-key/private-key")
+		privKeyPEM, err := os.ReadFile("/var/run/secrets/mechanic/github-app-private-key/private-key")
 		if err != nil {
-			logger.Fatal("failed to read GitHub App private key from volume — ensure github-app Secret is mounted at /var/run/secrets/mendabot/github-app-private-key",
+			logger.Fatal("failed to read GitHub App private key from volume — ensure github-app Secret is mounted at /var/run/secrets/mechanic/github-app-private-key",
 				zap.Error(err))
 		}
 		privKey, err := jwt.ParseRSAPrivateKeyFromPEM(privKeyPEM)

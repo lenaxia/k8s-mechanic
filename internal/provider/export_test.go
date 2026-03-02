@@ -13,3 +13,16 @@ func (r *SourceProviderReconciler) FirstSeen() map[string]time.Time {
 	r.initFirstSeen()
 	return r.firstSeen.Copy()
 }
+
+// NewBoundedMapForTest creates a BoundedMap for use in unit tests with explicit
+// configuration (bypasses the default constructor's zero-value adjustments).
+func NewBoundedMapForTest(maxSize int, ttl, cleanupInterval time.Duration) *BoundedMap {
+	return NewBoundedMap(maxSize, ttl, cleanupInterval)
+}
+
+// SetLastCleanupForTest overwrites lastCleanup for testing TTL/cleanup behaviour.
+func (m *BoundedMap) SetLastCleanupForTest(t time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.lastCleanup = t
+}

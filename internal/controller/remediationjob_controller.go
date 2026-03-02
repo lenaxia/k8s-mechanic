@@ -22,6 +22,7 @@ import (
 	"github.com/lenaxia/k8s-mechanic/internal/config"
 	"github.com/lenaxia/k8s-mechanic/internal/correlator"
 	"github.com/lenaxia/k8s-mechanic/internal/domain"
+	"github.com/lenaxia/k8s-mechanic/internal/metrics"
 )
 
 //+kubebuilder:rbac:groups=remediation.mechanic.io,resources=remediationjobs,verbs=get;list;watch;create;update;patch;delete
@@ -57,6 +58,36 @@ func (r *RemediationJobReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
+	}
+
+	// Detect SinkRef.URL becoming non-empty for the first time on any reconcile
+	// path. The agent writes SinkRef via kubectl patch which triggers a reconcile.
+	// ConditionPRRecorded is used as an idempotency gate so the counter is
+	// incremented exactly once per RemediationJob.
+	if rjob.Status.SinkRef.URL != "" && !apimeta.IsStatusConditionTrue(rjob.Status.Conditions, v1alpha1.ConditionPRRecorded) {
+		metrics.RecordPROpened()
+		rjobCopy := rjob.DeepCopyObject().(*v1alpha1.RemediationJob)
+		apimeta.SetStatusCondition(&rjob.Status.Conditions, metav1.Condition{
+			Type:               v1alpha1.ConditionPRRecorded,
+			Status:             metav1.ConditionTrue,
+			Reason:             "SinkRefObserved",
+			Message:            "SinkRef.URL observed; prs_opened_total incremented",
+			LastTransitionTime: metav1.Now(),
+		})
+		if patchErr := r.Status().Patch(ctx, &rjob, client.MergeFrom(rjobCopy)); patchErr != nil {
+			// Non-fatal: metric was already incremented; log and continue.
+			// On the next reconcile the condition will still be absent and the
+			// metric will fire again, so there is a narrow double-count window
+			// if the controller restarts before this patch succeeds. This is an
+			// accepted limitation of in-memory Prometheus counters: they reset on
+			// restart regardless, so at-least-once semantics are the best we can do.
+			if r.Log != nil {
+				r.Log.Warn("failed to patch PRRecorded condition; metric already incremented",
+					zap.String("remediationJob", rjob.Name),
+					zap.Error(patchErr),
+				)
+			}
+		}
 	}
 
 	// Initialise phase: a freshly-created object arrives with Phase=="". Transition
@@ -212,6 +243,25 @@ func (r *RemediationJobReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			if rjob.Status.CompletedAt == nil {
 				now := metav1.Now()
 				rjob.Status.CompletedAt = &now
+			}
+			// Emit job duration metric on terminal transitions (first time only,
+			// while CompletedAt is being set for the first time this reconcile).
+			// rjobCopy.Status.CompletedAt == nil means we just set it above.
+			if rjobCopy.Status.CompletedAt == nil && rjob.Status.DispatchedAt != nil {
+				outcome := metrics.OutcomeSucceeded
+				if rjob.Status.Phase == v1alpha1.PhasePermanentlyFailed {
+					outcome = metrics.OutcomePermanentlyFailed
+				} else if newPhase == v1alpha1.PhaseFailed {
+					outcome = metrics.OutcomeFailed
+				}
+				fp12 := ""
+				if len(rjob.Spec.Fingerprint) >= 12 {
+					fp12 = rjob.Spec.Fingerprint[:12]
+				}
+				metrics.ObserveJobDuration(fp12, outcome,
+					rjob.Status.DispatchedAt.Time,
+					rjob.Status.CompletedAt.Time,
+				)
 			}
 		}
 		if rjob.Status.JobRef == "" {
@@ -692,6 +742,7 @@ func (r *RemediationJobReconciler) transitionSuppressed(
 		Message:            fmt.Sprintf("suppressed: primary job UID %s handles investigation", string(primaryUID)),
 		LastTransitionTime: metav1.Now(),
 	})
+	metrics.RecordSuppressed(metrics.ReasonCorrelationSuppressed)
 	if err := r.Status().Patch(ctx, rjob, client.MergeFrom(rjobCopy)); err != nil {
 		return err
 	}
@@ -761,6 +812,25 @@ func (r *RemediationJobReconciler) concurrencyGate(ctx context.Context) (bool, c
 			activeCount++
 		}
 	}
+	// Update active jobs gauge. Always set regardless of gate outcome so
+	// the metric reflects the true count even when the gate is not triggered.
+	metrics.SetActiveJobs(activeCount)
+
+	// Count Pending RemediationJobs so operators can detect slot exhaustion.
+	var pendingJobs v1alpha1.RemediationJobList
+	if err := r.List(ctx, &pendingJobs,
+		client.InNamespace(r.Cfg.AgentNamespace),
+		client.MatchingLabels{"app.kubernetes.io/managed-by": "mechanic-watcher"},
+	); err == nil {
+		pendingCount := 0
+		for i := range pendingJobs.Items {
+			if pendingJobs.Items[i].Status.Phase == v1alpha1.PhasePending {
+				pendingCount++
+			}
+		}
+		metrics.SetPendingJobs(pendingCount)
+	}
+
 	if activeCount >= r.Cfg.MaxConcurrentJobs {
 		return true, ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}

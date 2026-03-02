@@ -169,6 +169,10 @@ func TestBuild_EnvVars_AllPresent(t *testing.T) {
 		"AGENT_PROVIDER_CONFIG",
 		"AGENT_TYPE",
 		"AGENT_NAMESPACE",
+		// Self-remediation context vars (always present, values vary by ChainDepth).
+		"IS_SELF_REMEDIATION",
+		"CHAIN_DEPTH",
+		"TARGET_REPO_OVERRIDE",
 	}
 	for _, name := range required {
 		if _, ok := getEnv(main, name); !ok {
@@ -1527,6 +1531,71 @@ func TestBuild_AgentHomeVolume_Present(t *testing.T) {
 	}
 	if vol.EmptyDir == nil {
 		t.Error("volume \"agent-home\" must be an emptyDir")
+	}
+}
+
+// --- Self-remediation context env vars ---
+
+// TestBuild_SelfRemediationEnv_NormalFinding verifies IS_SELF_REMEDIATION=false and
+// CHAIN_DEPTH=0 for a normal (non-cascade) finding.
+func TestBuild_SelfRemediationEnv_NormalFinding(t *testing.T) {
+	job := buildJob(t)
+	main := job.Spec.Template.Spec.Containers[0]
+
+	isSR, ok := getEnv(main, "IS_SELF_REMEDIATION")
+	if !ok {
+		t.Fatal("IS_SELF_REMEDIATION missing from main container env")
+	}
+	if isSR != "false" {
+		t.Errorf("IS_SELF_REMEDIATION = %q, want %q for ChainDepth=0", isSR, "false")
+	}
+
+	depth, ok := getEnv(main, "CHAIN_DEPTH")
+	if !ok {
+		t.Fatal("CHAIN_DEPTH missing from main container env")
+	}
+	if depth != "0" {
+		t.Errorf("CHAIN_DEPTH = %q, want %q for normal finding", depth, "0")
+	}
+
+	targetRepo, ok := getEnv(main, "TARGET_REPO_OVERRIDE")
+	if !ok {
+		t.Fatal("TARGET_REPO_OVERRIDE missing from main container env")
+	}
+	if targetRepo != "" {
+		t.Errorf("TARGET_REPO_OVERRIDE = %q, want empty string", targetRepo)
+	}
+}
+
+// TestBuild_SelfRemediationEnv_CascadeFinding verifies IS_SELF_REMEDIATION=true and
+// CHAIN_DEPTH=<n> for a cascade (self-remediation) finding.
+func TestBuild_SelfRemediationEnv_CascadeFinding(t *testing.T) {
+	b, err := New(Config{AgentNamespace: "mechanic"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	rjob := *testRJob
+	rjob.Spec.Finding.ChainDepth = 2
+	job, err := b.Build(&rjob, nil)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	main := job.Spec.Template.Spec.Containers[0]
+
+	isSR, ok := getEnv(main, "IS_SELF_REMEDIATION")
+	if !ok {
+		t.Fatal("IS_SELF_REMEDIATION missing from main container env")
+	}
+	if isSR != "true" {
+		t.Errorf("IS_SELF_REMEDIATION = %q, want %q for ChainDepth=2", isSR, "true")
+	}
+
+	depth, ok := getEnv(main, "CHAIN_DEPTH")
+	if !ok {
+		t.Fatal("CHAIN_DEPTH missing from main container env")
+	}
+	if depth != "2" {
+		t.Errorf("CHAIN_DEPTH = %q, want %q", depth, "2")
 	}
 }
 

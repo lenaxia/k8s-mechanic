@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/resource"
+
 	"github.com/lenaxia/k8s-mechanic/internal/domain"
 )
 
@@ -93,7 +95,7 @@ type Config struct {
 	RemediationJobShortTTLSeconds int // REMEDIATION_JOB_SHORT_TTL_SECONDS — default 86400
 
 	// Agent Job resource limits. Applied to all three Job containers
-	// (git-token-clone, dry-run-gate, mendabot-agent).
+	// (git-token-clone, dry-run-gate, mechanic-agent).
 	// Defaults are conservative; tune via Helm values or env vars.
 	AgentCPURequest string // AGENT_CPU_REQUEST    — default "100m"
 	AgentMemRequest string // AGENT_MEM_REQUEST    — default "128Mi"
@@ -408,24 +410,34 @@ func FromEnv() (Config, error) {
 	}
 
 	// Agent Job resource limits — applied to all Job containers.
-	// Values are passed verbatim to Kubernetes; invalid quantities cause a Job
-	// creation error at runtime, not a startup error here, to keep startup fast.
-	cfg.AgentCPURequest = os.Getenv("AGENT_CPU_REQUEST")
-	if cfg.AgentCPURequest == "" {
-		cfg.AgentCPURequest = "100m"
+	// Values are validated at startup so that jobbuilder.Build never panics on
+	// a malformed quantity string (resource.MustParse panics, not errors).
+	type quantityField struct {
+		envName string
+		dest    *string
+		def     string
 	}
-	cfg.AgentMemRequest = os.Getenv("AGENT_MEM_REQUEST")
-	if cfg.AgentMemRequest == "" {
-		cfg.AgentMemRequest = "128Mi"
-	}
-	cfg.AgentCPULimit = os.Getenv("AGENT_CPU_LIMIT")
-	if cfg.AgentCPULimit == "" {
-		cfg.AgentCPULimit = "500m"
-	}
-	cfg.AgentMemLimit = os.Getenv("AGENT_MEM_LIMIT")
-	if cfg.AgentMemLimit == "" {
-		cfg.AgentMemLimit = "512Mi"
+	for _, qf := range []quantityField{
+		{"AGENT_CPU_REQUEST", &cfg.AgentCPURequest, "100m"},
+		{"AGENT_MEM_REQUEST", &cfg.AgentMemRequest, "128Mi"},
+		{"AGENT_CPU_LIMIT", &cfg.AgentCPULimit, "500m"},
+		{"AGENT_MEM_LIMIT", &cfg.AgentMemLimit, "512Mi"},
+	} {
+		val := os.Getenv(qf.envName)
+		if val == "" {
+			val = qf.def
+		}
+		if _, err := parseQuantity(val); err != nil {
+			return Config{}, fmt.Errorf("%s %q is not a valid Kubernetes quantity: %w", qf.envName, val, err)
+		}
+		*qf.dest = val
 	}
 
 	return cfg, nil
+}
+
+// parseQuantity wraps resource.ParseQuantity so config.go can validate quantity
+// strings at startup without calling the panicking resource.MustParse variant.
+func parseQuantity(s string) (resource.Quantity, error) {
+	return resource.ParseQuantity(s)
 }

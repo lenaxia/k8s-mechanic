@@ -226,8 +226,11 @@ rbac:
 
 # -- Prometheus metrics for the watcher Deployment.
 metrics:
-  # -- Expose a metrics Service on port 8080.
-  enabled: false
+  # -- Expose a metrics Service on port 8080. Enabled by default so that
+  # mechanic_* metrics are immediately scrapeable after install.
+  # The watcher always binds :8080/metrics regardless of this flag;
+  # setting enabled: false only suppresses the Kubernetes Service resource.
+  enabled: true
   serviceMonitor:
     # -- Create a Prometheus Operator ServiceMonitor CR.
     # Requires metrics.enabled: true and Prometheus Operator installed.

@@ -4,6 +4,31 @@ Verify the watcher is running:
   kubectl get deployment -n {{ .Release.Namespace }} {{ include "mechanic.fullname" . }}
   kubectl get rjob -n {{ .Release.Namespace }}
 
+{{- if .Values.metrics.enabled }}
+
+Prometheus metrics are exposed on port 8080 (/metrics) via:
+  kubectl get svc -n {{ .Release.Namespace }} {{ include "mechanic.fullname" . }}-metrics
+
+Available metrics (all prefixed mechanic_):
+  findings_dispatched_total    - RemediationJobs created, by kind/severity
+  findings_suppressed_total    - Findings filtered before dispatch, by reason
+  agent_jobs_active            - Active agent batch/v1 Jobs (current)
+  agent_jobs_pending           - RemediationJobs waiting for a concurrency slot
+  agent_job_duration_seconds   - Per-job wall-clock duration (fingerprint/outcome)
+  prs_opened_total             - GitHub PRs opened by agent Jobs
+  prs_closed_total             - GitHub PRs closed by auto-close
+  circuit_breaker_activations_total - Self-remediation circuit breaker trips
+{{- if .Values.metrics.serviceMonitor.enabled }}
+
+NOTE: ServiceMonitor is enabled. Ensure Prometheus Operator is installed in your
+cluster, otherwise the ServiceMonitor resource will be ignored.
+{{- else }}
+
+To enable a Prometheus Operator ServiceMonitor:
+  helm upgrade mechanic ... --set metrics.serviceMonitor.enabled=true
+{{- end }}
+{{- end }}
+
 REQUIRED: Create the following Secrets before the watcher can function.
 The names and keys below are derived from your agent.type value and are
 compile-time constants in the mechanic jobbuilder. They cannot be overridden
@@ -53,11 +78,6 @@ BREAKING CHANGE (from <=v0.x):
        kubectl delete secret llm-credentials -n {{ .Release.Namespace }}
   2. Create the new secret per the instructions above.
   3. Set agent.type in your values.yaml (default: "opencode").
-{{- if .Values.metrics.serviceMonitor.enabled }}
-
-NOTE: ServiceMonitor is enabled. Ensure Prometheus Operator is installed in your
-cluster, otherwise the ServiceMonitor resource will be ignored.
-{{- end }}
 
 For documentation see https://github.com/lenaxia/k8s-mechanic
 

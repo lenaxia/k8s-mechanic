@@ -4037,3 +4037,874 @@ func TestDedup_MergeCheckerError_SuppressedWithinShortTTL(t *testing.T) {
 		t.Errorf("expected 1 rjob (tombstone) on checker error within TTL, got %d", len(list.Items))
 	}
 }
+
+// ===========================================================================
+// Error path coverage (previously uncovered branches)
+// ===========================================================================
+
+// TestReconcile_GetError_NonNotFound verifies that a non-NotFound error from
+// r.Get (fetching the watched object) is propagated as a reconciler error.
+func TestReconcile_GetError_NonNotFound(t *testing.T) {
+	s := newTestScheme()
+	simulatedErr := fmt.Errorf("simulated API server error")
+	c := fake.NewClientBuilder().
+		WithScheme(s).
+		WithStatusSubresource(&v1alpha1.RemediationJob{}).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+				if _, ok := obj.(*corev1.ConfigMap); ok {
+					return simulatedErr
+				}
+				return cl.Get(ctx, key, obj, opts...)
+			},
+		}).
+		Build()
+
+	p := &fakeSourceProvider{name: "native", objectType: &corev1.ConfigMap{}}
+	r := &provider.SourceProviderReconciler{
+		Client:   c,
+		Scheme:   s,
+		Cfg:      config.Config{AgentNamespace: agentNamespace},
+		Provider: p,
+	}
+
+	_, err := r.Reconcile(context.Background(), reqFor("r1", "default"))
+	if err == nil {
+		t.Error("expected non-nil error for non-NotFound Get error, got nil")
+	}
+	if !strings.Contains(err.Error(), "simulated API server error") {
+		t.Errorf("expected error to contain the simulated message, got: %v", err)
+	}
+}
+
+// TestReconcile_NotFound_ListError verifies that when the watched object is not
+// found and r.List returns an error, the error is propagated.
+func TestReconcile_NotFound_ListError(t *testing.T) {
+	s := newTestScheme()
+	simulatedErr := fmt.Errorf("list error")
+	c := fake.NewClientBuilder().
+		WithScheme(s).
+		WithStatusSubresource(&v1alpha1.RemediationJob{}).
+		WithInterceptorFuncs(interceptor.Funcs{
+			List: func(ctx context.Context, cl client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+				if _, ok := list.(*v1alpha1.RemediationJobList); ok {
+					return simulatedErr
+				}
+				return cl.List(ctx, list, opts...)
+			},
+		}).
+		Build()
+
+	p := &fakeSourceProvider{name: "native", objectType: &corev1.ConfigMap{}}
+	r := &provider.SourceProviderReconciler{
+		Client:   c,
+		Scheme:   s,
+		Cfg:      config.Config{AgentNamespace: agentNamespace},
+		Provider: p,
+	}
+
+	// No watched object → triggers IsNotFound path → List is called.
+	_, err := r.Reconcile(context.Background(), reqFor("r1", "default"))
+	if err == nil {
+		t.Error("expected non-nil error when List fails in NotFound path, got nil")
+	}
+}
+
+// TestReconcile_NotFound_StatusPatchError verifies that a Status().Patch error
+// during job cancellation is collected and returned as a joined error.
+func TestReconcile_NotFound_StatusPatchError(t *testing.T) {
+	pendingRJob := &v1alpha1.RemediationJob{
+		ObjectMeta: metav1.ObjectMeta{Name: "mechanic-patch-err", Namespace: agentNamespace},
+		Spec: v1alpha1.RemediationJobSpec{
+			SourceResultRef: v1alpha1.ResultRef{Name: "r1", Namespace: "default"},
+		},
+		Status: v1alpha1.RemediationJobStatus{Phase: v1alpha1.PhasePending},
+	}
+
+	s := newTestScheme()
+	simulatedErr := fmt.Errorf("patch forbidden")
+	c := fake.NewClientBuilder().
+		WithScheme(s).
+		WithStatusSubresource(&v1alpha1.RemediationJob{}).
+		WithObjects(pendingRJob).
+		WithInterceptorFuncs(interceptor.Funcs{
+			SubResourcePatch: func(ctx context.Context, cl client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+				return simulatedErr
+			},
+		}).
+		Build()
+
+	p := &fakeSourceProvider{name: "native", objectType: &corev1.ConfigMap{}}
+	r := &provider.SourceProviderReconciler{
+		Client:   c,
+		Scheme:   s,
+		Cfg:      config.Config{AgentNamespace: agentNamespace},
+		Provider: p,
+	}
+
+	_, err := r.Reconcile(context.Background(), reqFor("r1", "default"))
+	if err == nil {
+		t.Error("expected non-nil error when Status().Patch fails during cancellation, got nil")
+	}
+}
+
+// TestReconcile_NotFound_DeleteError verifies that a Delete error during job
+// cancellation (after successful patch) is collected and returned.
+func TestReconcile_NotFound_DeleteError(t *testing.T) {
+	pendingRJob := &v1alpha1.RemediationJob{
+		ObjectMeta: metav1.ObjectMeta{Name: "mechanic-del-err", Namespace: agentNamespace},
+		Spec: v1alpha1.RemediationJobSpec{
+			SourceResultRef: v1alpha1.ResultRef{Name: "r1", Namespace: "default"},
+		},
+		Status: v1alpha1.RemediationJobStatus{Phase: v1alpha1.PhasePending},
+	}
+
+	s := newTestScheme()
+	simulatedErr := fmt.Errorf("delete forbidden")
+	c := fake.NewClientBuilder().
+		WithScheme(s).
+		WithStatusSubresource(&v1alpha1.RemediationJob{}).
+		WithObjects(pendingRJob).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Delete: func(ctx context.Context, cl client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+				if _, ok := obj.(*v1alpha1.RemediationJob); ok {
+					return simulatedErr
+				}
+				return cl.Delete(ctx, obj, opts...)
+			},
+		}).
+		Build()
+
+	p := &fakeSourceProvider{name: "native", objectType: &corev1.ConfigMap{}}
+	r := &provider.SourceProviderReconciler{
+		Client:   c,
+		Scheme:   s,
+		Cfg:      config.Config{AgentNamespace: agentNamespace},
+		Provider: p,
+	}
+
+	_, err := r.Reconcile(context.Background(), reqFor("r1", "default"))
+	if err == nil {
+		t.Error("expected non-nil error when Delete fails during cancellation, got nil")
+	}
+	if !strings.Contains(err.Error(), "delete forbidden") {
+		t.Errorf("expected error to mention 'delete forbidden', got: %v", err)
+	}
+}
+
+// TestReconcile_ExtractFindingError verifies that when ExtractFinding returns
+// a non-nil error, Reconcile propagates it.
+func TestReconcile_ExtractFindingError(t *testing.T) {
+	obj := makeWatchedObject("r1", "default")
+	c := newTestClient(obj)
+
+	p := &fakeSourceProvider{
+		name:       "native",
+		objectType: &corev1.ConfigMap{},
+		findErr:    fmt.Errorf("extract finding failure"),
+	}
+	r := newTestReconciler(p, c)
+
+	_, err := r.Reconcile(context.Background(), reqFor("r1", "default"))
+	if err == nil {
+		t.Error("expected non-nil error from ExtractFinding failure, got nil")
+	}
+	if !strings.Contains(err.Error(), "extract finding failure") {
+		t.Errorf("expected error to contain 'extract finding failure', got: %v", err)
+	}
+}
+
+// TestReconcile_FindingCleared_ListError verifies that when finding is nil
+// (cleared) and PRAutoClose is true but List returns an error, Reconcile logs
+// the error but returns nil (non-fatal path).
+func TestReconcile_FindingCleared_ListError(t *testing.T) {
+	obj := makeWatchedObject("r1", "default")
+	s := newTestScheme()
+	simulatedErr := fmt.Errorf("list rjobs error")
+	c := fake.NewClientBuilder().
+		WithScheme(s).
+		WithStatusSubresource(&v1alpha1.RemediationJob{}).
+		WithObjects(obj).
+		WithInterceptorFuncs(interceptor.Funcs{
+			List: func(ctx context.Context, cl client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+				if _, ok := list.(*v1alpha1.RemediationJobList); ok {
+					return simulatedErr
+				}
+				return cl.List(ctx, list, opts...)
+			},
+		}).
+		Build()
+
+	logger, _ := newObserverInfoLogger()
+	p := &fakeSourceProvider{
+		name:       "native",
+		objectType: &corev1.ConfigMap{},
+		finding:    nil, // finding cleared
+	}
+	r := &provider.SourceProviderReconciler{
+		Client: c,
+		Scheme: s,
+		Cfg: config.Config{
+			AgentNamespace: agentNamespace,
+			PRAutoClose:    true,
+		},
+		Provider:   p,
+		SinkCloser: &fakeSinkCloser{},
+		Log:        logger,
+	}
+
+	// Must return nil — list error in the auto-close path is non-fatal.
+	_, err := r.Reconcile(context.Background(), reqFor("r1", "default"))
+	if err != nil {
+		t.Errorf("expected nil error (list error in finding-cleared auto-close path is non-fatal), got: %v", err)
+	}
+}
+
+// TestReconcile_DedupeListError verifies that when r.List (fingerprint dedup
+// lookup) returns a non-NotFound error, Reconcile propagates it.
+func TestReconcile_DedupeListError(t *testing.T) {
+	obj := makeWatchedObject("r1", "default")
+	s := newTestScheme()
+	simulatedErr := fmt.Errorf("fingerprint list error")
+	callCount := 0
+	c := fake.NewClientBuilder().
+		WithScheme(s).
+		WithStatusSubresource(&v1alpha1.RemediationJob{}).
+		WithObjects(obj).
+		WithInterceptorFuncs(interceptor.Funcs{
+			List: func(ctx context.Context, cl client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+				if _, ok := list.(*v1alpha1.RemediationJobList); ok {
+					callCount++
+					// First List call is the fingerprint dedup lookup.
+					if callCount == 1 {
+						return simulatedErr
+					}
+				}
+				return cl.List(ctx, list, opts...)
+			},
+		}).
+		Build()
+
+	p := &fakeSourceProvider{
+		name:       "native",
+		objectType: &corev1.ConfigMap{},
+		finding: &domain.Finding{
+			Kind: "Pod", Namespace: "default", ParentObject: "my-deploy",
+			Errors: `[{"text":"CrashLoopBackOff"}]`,
+		},
+	}
+	r := &provider.SourceProviderReconciler{
+		Client:   c,
+		Scheme:   s,
+		Cfg:      config.Config{AgentNamespace: agentNamespace},
+		Provider: p,
+	}
+
+	_, err := r.Reconcile(context.Background(), reqFor("r1", "default"))
+	if err == nil {
+		t.Error("expected non-nil error when fingerprint List fails, got nil")
+	}
+}
+
+// TestReconcile_FingerprintLabelMismatch verifies that a RemediationJob whose
+// label prefix matches but whose full fingerprint differs (collision prefix) is
+// skipped — a new RemediationJob is created.
+func TestReconcile_FingerprintLabelMismatch(t *testing.T) {
+	finding := &domain.Finding{
+		Kind: "Pod", Namespace: "default", ParentObject: "my-deploy",
+		Errors: `[{"text":"CrashLoopBackOff"}]`,
+	}
+	fp, _ := domain.FindingFingerprint(finding)
+
+	// Create an rjob with the same label prefix but a different full fingerprint.
+	mismatchRJob := &v1alpha1.RemediationJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "mechanic-" + fp[:12],
+			Namespace: agentNamespace,
+			Labels:    map[string]string{"remediation.mechanic.io/fingerprint": fp[:12]},
+		},
+		Spec: v1alpha1.RemediationJobSpec{
+			Fingerprint: fp + "DIFFERENT", // full fingerprint mismatch
+			SourceType:  "native",
+		},
+		Status: v1alpha1.RemediationJobStatus{Phase: v1alpha1.PhasePending},
+	}
+
+	obj := makeWatchedObject("r1", "default")
+	// Use a different name for the existing rjob to avoid AlreadyExists on create.
+	mismatchRJob.Name = "mechanic-" + fp[:12] + "-other"
+	c := newTestClient(obj, mismatchRJob)
+
+	p2 := &fakeSourceProvider{name: "native", objectType: &corev1.ConfigMap{}, finding: finding}
+	r2 := newTestReconciler(p2, c)
+
+	_, err := r2.Reconcile(context.Background(), reqFor("r1", "default"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var list v1alpha1.RemediationJobList
+	_ = c.List(context.Background(), &list, client.InNamespace(agentNamespace))
+	// mismatch rjob is skipped, new one created → 2 total
+	if len(list.Items) != 2 {
+		t.Errorf("expected 2 rjobs (mismatch + new), got %d", len(list.Items))
+	}
+}
+
+// TestReconcile_ParentHierarchy_Suppressed verifies that a Pod-level finding is
+// suppressed when a Deployment-level RemediationJob for the same parent already exists.
+func TestReconcile_ParentHierarchy_Suppressed(t *testing.T) {
+	// Pod finding — rank 1
+	podFinding := &domain.Finding{
+		Kind:         "Pod",
+		Name:         "my-pod-abc",
+		Namespace:    "default",
+		ParentObject: "Deployment/my-app",
+		Errors:       `[{"text":"CrashLoopBackOff"}]`,
+	}
+
+	// Existing Deployment-level rjob — rank 10 (higher)
+	deployRJob := &v1alpha1.RemediationJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "mechanic-deploy001",
+			Namespace: agentNamespace,
+			Labels: map[string]string{
+				"app.kubernetes.io/managed-by": "mechanic-watcher",
+			},
+		},
+		Spec: v1alpha1.RemediationJobSpec{
+			Fingerprint: "deploy001deploy002deploy003",
+			Finding: v1alpha1.FindingSpec{
+				Kind:         "Deployment",
+				Name:         "my-app",
+				Namespace:    "default",
+				ParentObject: "Deployment/my-app",
+			},
+		},
+		Status: v1alpha1.RemediationJobStatus{Phase: v1alpha1.PhasePending},
+	}
+
+	obj := makeWatchedObject("my-pod-abc", "default")
+	c := newTestClient(obj, deployRJob)
+	p := &fakeSourceProvider{name: "native", objectType: &corev1.ConfigMap{}, finding: podFinding}
+	r := newTestReconciler(p, c)
+
+	result, err := r.Reconcile(context.Background(), reqFor("my-pod-abc", "default"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Should be suppressed with a 30s requeue.
+	if result.RequeueAfter != 30*time.Second {
+		t.Errorf("expected RequeueAfter=30s for parent-hierarchy suppression, got %v", result.RequeueAfter)
+	}
+
+	// No new RemediationJob should be created.
+	var list v1alpha1.RemediationJobList
+	_ = c.List(context.Background(), &list, client.InNamespace(agentNamespace))
+	if len(list.Items) != 1 {
+		t.Errorf("expected 1 rjob (existing deployment rjob), got %d", len(list.Items))
+	}
+}
+
+// TestReconcile_ParentHierarchy_SameLevelNotSuppressed verifies that a finding
+// is NOT suppressed by parent-hierarchy when the peer is at the same rank.
+func TestReconcile_ParentHierarchy_SameLevelNotSuppressed(t *testing.T) {
+	podFinding := &domain.Finding{
+		Kind:         "Pod",
+		Name:         "my-pod-abc",
+		Namespace:    "default",
+		ParentObject: "Deployment/my-app",
+		Errors:       `[{"text":"CrashLoopBackOff"}]`,
+	}
+
+	// Another Pod-level rjob — same rank (1), not higher.
+	peerRJob := &v1alpha1.RemediationJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "mechanic-peer001",
+			Namespace: agentNamespace,
+			Labels: map[string]string{
+				"app.kubernetes.io/managed-by": "mechanic-watcher",
+			},
+		},
+		Spec: v1alpha1.RemediationJobSpec{
+			Fingerprint: "peer001peer002peer003",
+			Finding: v1alpha1.FindingSpec{
+				Kind:         "Pod",
+				Name:         "my-pod-xyz",
+				Namespace:    "default",
+				ParentObject: "Deployment/my-app",
+			},
+		},
+		Status: v1alpha1.RemediationJobStatus{Phase: v1alpha1.PhasePending},
+	}
+
+	obj := makeWatchedObject("my-pod-abc", "default")
+	c := newTestClient(obj, peerRJob)
+	p := &fakeSourceProvider{name: "native", objectType: &corev1.ConfigMap{}, finding: podFinding}
+	r := newTestReconciler(p, c)
+
+	_, err := r.Reconcile(context.Background(), reqFor("my-pod-abc", "default"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var list v1alpha1.RemediationJobList
+	_ = c.List(context.Background(), &list, client.InNamespace(agentNamespace))
+	// New rjob should be created alongside the peer.
+	if len(list.Items) != 2 {
+		t.Errorf("expected 2 rjobs (peer + new pod rjob), got %d", len(list.Items))
+	}
+}
+
+// TestReconcile_ParentHierarchy_DifferentNamespace_NotSuppressed verifies that
+// hierarchy suppression does not fire across namespace boundaries.
+func TestReconcile_ParentHierarchy_DifferentNamespace_NotSuppressed(t *testing.T) {
+	podFinding := &domain.Finding{
+		Kind:         "Pod",
+		Name:         "my-pod-abc",
+		Namespace:    "production",
+		ParentObject: "Deployment/my-app",
+		Errors:       `[{"text":"CrashLoopBackOff"}]`,
+	}
+
+	// Deployment rjob in a different namespace — must not suppress.
+	deployRJob := &v1alpha1.RemediationJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "mechanic-cross-ns",
+			Namespace: agentNamespace,
+			Labels: map[string]string{
+				"app.kubernetes.io/managed-by": "mechanic-watcher",
+			},
+		},
+		Spec: v1alpha1.RemediationJobSpec{
+			Fingerprint: "crossns001crossns002a",
+			Finding: v1alpha1.FindingSpec{
+				Kind:         "Deployment",
+				Name:         "my-app",
+				Namespace:    "staging", // different namespace
+				ParentObject: "Deployment/my-app",
+			},
+		},
+		Status: v1alpha1.RemediationJobStatus{Phase: v1alpha1.PhasePending},
+	}
+
+	obj := makeWatchedObject("my-pod-abc", "production")
+	c := newTestClient(obj, deployRJob)
+	p := &fakeSourceProvider{name: "native", objectType: &corev1.ConfigMap{}, finding: podFinding}
+	r := newTestReconciler(p, c)
+
+	_, err := r.Reconcile(context.Background(), reqFor("my-pod-abc", "production"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var list v1alpha1.RemediationJobList
+	_ = c.List(context.Background(), &list, client.InNamespace(agentNamespace))
+	// New rjob should be created.
+	if len(list.Items) != 2 {
+		t.Errorf("expected 2 rjobs (cross-ns deploy rjob + new pod rjob), got %d", len(list.Items))
+	}
+}
+
+// TestReconcile_ParentHierarchy_ListError verifies that a List error in the
+// parent-hierarchy suppression block is propagated.
+func TestReconcile_ParentHierarchy_ListError(t *testing.T) {
+	podFinding := &domain.Finding{
+		Kind:         "Pod",
+		Name:         "my-pod-abc",
+		Namespace:    "default",
+		ParentObject: "Deployment/my-app",
+		Errors:       `[{"text":"CrashLoopBackOff"}]`,
+	}
+
+	obj := makeWatchedObject("my-pod-abc", "default")
+	s := newTestScheme()
+	simulatedErr := fmt.Errorf("hierarchy list error")
+	callCount := 0
+	c := fake.NewClientBuilder().
+		WithScheme(s).
+		WithStatusSubresource(&v1alpha1.RemediationJob{}).
+		WithObjects(obj).
+		WithInterceptorFuncs(interceptor.Funcs{
+			List: func(ctx context.Context, cl client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+				if _, ok := list.(*v1alpha1.RemediationJobList); ok {
+					callCount++
+					// First List is the fingerprint dedup (no label restriction on managed-by).
+					// Second List is the parent-hierarchy suppression (has managed-by label).
+					// We fail the second one.
+					if callCount == 2 {
+						return simulatedErr
+					}
+				}
+				return cl.List(ctx, list, opts...)
+			},
+		}).
+		Build()
+
+	p := &fakeSourceProvider{name: "native", objectType: &corev1.ConfigMap{}, finding: podFinding}
+	r := &provider.SourceProviderReconciler{
+		Client:   c,
+		Scheme:   s,
+		Cfg:      config.Config{AgentNamespace: agentNamespace},
+		Provider: p,
+	}
+
+	_, err := r.Reconcile(context.Background(), reqFor("my-pod-abc", "default"))
+	if err == nil {
+		t.Error("expected non-nil error when parent-hierarchy List fails, got nil")
+	}
+	if !strings.Contains(err.Error(), "hierarchy list error") {
+		t.Errorf("expected error to mention 'hierarchy list error', got: %v", err)
+	}
+}
+
+// TestReconcile_ParentHierarchy_Suppressed_AuditLog verifies that the
+// parent-hierarchy suppression emits an audit log entry with the correct event
+// and structured fields.
+func TestReconcile_ParentHierarchy_Suppressed_AuditLog(t *testing.T) {
+	podFinding := &domain.Finding{
+		Kind:         "Pod",
+		Name:         "my-pod-abc",
+		Namespace:    "default",
+		ParentObject: "Deployment/my-app",
+		Errors:       `[{"text":"CrashLoopBackOff"}]`,
+	}
+
+	deployRJob := &v1alpha1.RemediationJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "mechanic-deploy-audit",
+			Namespace: agentNamespace,
+			Labels: map[string]string{
+				"app.kubernetes.io/managed-by": "mechanic-watcher",
+			},
+		},
+		Spec: v1alpha1.RemediationJobSpec{
+			Fingerprint: "deployaudit01deployaudit0",
+			Finding: v1alpha1.FindingSpec{
+				Kind:         "Deployment",
+				Name:         "my-app",
+				Namespace:    "default",
+				ParentObject: "Deployment/my-app",
+			},
+		},
+		Status: v1alpha1.RemediationJobStatus{Phase: v1alpha1.PhasePending},
+	}
+
+	obj := makeWatchedObject("my-pod-abc", "default")
+	c := newTestClient(obj, deployRJob)
+	logger, logs := newObserverInfoLogger()
+	p := &fakeSourceProvider{name: "native", objectType: &corev1.ConfigMap{}, finding: podFinding}
+	r := &provider.SourceProviderReconciler{
+		Client:   c,
+		Scheme:   newTestScheme(),
+		Cfg:      config.Config{AgentNamespace: agentNamespace},
+		Provider: p,
+		Log:      logger,
+	}
+
+	_, err := r.Reconcile(context.Background(), reqFor("my-pod-abc", "default"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var found bool
+	for _, entry := range logs.All() {
+		cm := entry.ContextMap()
+		if cm["event"] == "finding.suppressed.parent_hierarchy" && cm["audit"] == true {
+			found = true
+			if cm["kind"] != "Pod" {
+				t.Errorf("expected kind=Pod in log, got %v", cm["kind"])
+			}
+			if cm["parentObject"] != "Deployment/my-app" {
+				t.Errorf("expected parentObject=Deployment/my-app in log, got %v", cm["parentObject"])
+			}
+			if cm["supersededByKind"] != "Deployment" {
+				t.Errorf("expected supersededByKind=Deployment in log, got %v", cm["supersededByKind"])
+			}
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected audit log entry with event=finding.suppressed.parent_hierarchy, got entries: %v", logs.All())
+	}
+}
+
+// TestReconcile_AgentRBACScope_Namespace verifies that when AgentRBACScope="namespace",
+// the created RemediationJob uses AgentSA="mechanic-agent-ns" regardless of config.AgentSA.
+func TestReconcile_AgentRBACScope_Namespace(t *testing.T) {
+	finding := &domain.Finding{
+		Kind: "Pod", Namespace: "default", ParentObject: "my-deploy",
+		Errors: `[{"text":"CrashLoopBackOff"}]`,
+	}
+	p := &fakeSourceProvider{name: "native", objectType: &corev1.ConfigMap{}, finding: finding}
+	obj := makeWatchedObject("r1", "default")
+	c := newTestClient(obj)
+	r := &provider.SourceProviderReconciler{
+		Client: c,
+		Scheme: newTestScheme(),
+		Cfg: config.Config{
+			AgentNamespace: agentNamespace,
+			AgentSA:        "mechanic-agent",
+			AgentRBACScope: "namespace",
+		},
+		Provider: p,
+	}
+
+	_, err := r.Reconcile(context.Background(), reqFor("r1", "default"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var list v1alpha1.RemediationJobList
+	_ = c.List(context.Background(), &list, client.InNamespace(agentNamespace))
+	if len(list.Items) != 1 {
+		t.Fatalf("expected 1 RemediationJob, got %d", len(list.Items))
+	}
+	if list.Items[0].Spec.AgentSA != "mechanic-agent-ns" {
+		t.Errorf("expected AgentSA=mechanic-agent-ns for namespace scope, got %q", list.Items[0].Spec.AgentSA)
+	}
+}
+
+// TestReconcile_CreateRace_AlreadyExists verifies that an AlreadyExists error
+// from r.Create is treated as a benign duplicate (suppressed, no error returned).
+func TestReconcile_CreateRace_AlreadyExists(t *testing.T) {
+	finding := &domain.Finding{
+		Kind: "Pod", Namespace: "default", ParentObject: "my-deploy",
+		Errors: `[{"text":"CrashLoopBackOff"}]`,
+	}
+	fp, _ := domain.FindingFingerprint(finding)
+
+	obj := makeWatchedObject("r1", "default")
+	// Pre-create an rjob with the same name but NO fingerprint label, so the
+	// dedup List (label-filtered) misses it, then Create returns AlreadyExists.
+	existingNoLabel := &v1alpha1.RemediationJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "mechanic-" + fp[:12],
+			Namespace: agentNamespace,
+			// No fingerprint label — won't be found by the dedup List
+		},
+		Spec: v1alpha1.RemediationJobSpec{Fingerprint: fp, SourceType: "native"},
+	}
+	c := newTestClient(obj, existingNoLabel)
+	p := &fakeSourceProvider{name: "native", objectType: &corev1.ConfigMap{}, finding: finding}
+	r := newTestReconciler(p, c)
+
+	_, err := r.Reconcile(context.Background(), reqFor("r1", "default"))
+	if err != nil {
+		t.Errorf("expected nil error for AlreadyExists create race, got: %v", err)
+	}
+}
+
+// ===========================================================================
+// BoundedMap unit tests (previously 0% coverage methods)
+// ===========================================================================
+
+func TestBoundedMap_Delete(t *testing.T) {
+	m := provider.NewBoundedMapForTest(10, 0, 0)
+	m.Set("key1")
+	m.Set("key2")
+	if m.Len() != 2 {
+		t.Fatalf("expected 2 entries after Set, got %d", m.Len())
+	}
+	m.Delete("key1")
+	if m.Len() != 1 {
+		t.Errorf("expected 1 entry after Delete, got %d", m.Len())
+	}
+	if _, exists := m.Get("key1"); exists {
+		t.Error("expected key1 to be absent after Delete")
+	}
+	// Deleting a non-existent key must not panic or error.
+	m.Delete("does-not-exist")
+	if m.Len() != 1 {
+		t.Errorf("expected 1 entry after no-op Delete, got %d", m.Len())
+	}
+}
+
+func TestBoundedMap_Len(t *testing.T) {
+	m := provider.NewBoundedMapForTest(10, 0, 0)
+	if m.Len() != 0 {
+		t.Errorf("expected 0 for empty map, got %d", m.Len())
+	}
+	m.Set("a")
+	m.Set("b")
+	m.Set("c")
+	if m.Len() != 3 {
+		t.Errorf("expected 3 after 3 Sets, got %d", m.Len())
+	}
+	m.Delete("b")
+	if m.Len() != 2 {
+		t.Errorf("expected 2 after Delete, got %d", m.Len())
+	}
+}
+
+func TestBoundedMap_Keys(t *testing.T) {
+	m := provider.NewBoundedMapForTest(10, 0, 0)
+	m.Set("alpha")
+	m.Set("beta")
+	m.Set("gamma")
+	keys := m.Keys()
+	if len(keys) != 3 {
+		t.Fatalf("expected 3 keys, got %d: %v", len(keys), keys)
+	}
+	keySet := make(map[string]bool)
+	for _, k := range keys {
+		keySet[k] = true
+	}
+	for _, want := range []string{"alpha", "beta", "gamma"} {
+		if !keySet[want] {
+			t.Errorf("expected key %q in Keys(), got %v", want, keys)
+		}
+	}
+}
+
+func TestBoundedMap_Cleanup(t *testing.T) {
+	ttl := 50 * time.Millisecond
+	m := provider.NewBoundedMapForTest(10, ttl, ttl/2)
+
+	m.Set("live-key")
+	// Manually insert an already-expired entry via SetForTest.
+	m.SetForTest("expired-key", time.Now().Add(-2*ttl))
+
+	// Force cleanup interval to have elapsed by manipulating lastCleanup
+	// via a second SetForTest call that resets it; instead just call Cleanup
+	// after the interval has elapsed.
+	time.Sleep(ttl)
+	m.Cleanup()
+
+	if _, exists := m.Get("expired-key"); exists {
+		t.Error("expected expired-key to be removed after Cleanup")
+	}
+	// live-key was set very recently — it should still be present IF its TTL
+	// has not elapsed. Since we slept for ttl (50ms) and live-key was set at
+	// the start, it may have expired too. Check unconditionally that Cleanup
+	// does not panic and the map length is valid (0 or 1).
+	_ = m.Len()
+}
+
+func TestBoundedMap_SetWithTime_CapacityEviction(t *testing.T) {
+	// Cap at 3 entries. Setting a 4th must evict the oldest.
+	m := provider.NewBoundedMapForTest(3, 0, 0)
+
+	t0 := time.Now().Add(-3 * time.Second)
+	t1 := time.Now().Add(-2 * time.Second)
+	t2 := time.Now().Add(-1 * time.Second)
+
+	m.SetForTest("oldest", t0)
+	m.SetForTest("middle", t1)
+	m.SetForTest("newest", t2)
+
+	if m.Len() != 3 {
+		t.Fatalf("expected 3 entries, got %d", m.Len())
+	}
+
+	// Add a 4th entry — "oldest" must be evicted to make room.
+	m.Set("fourth")
+
+	if m.Len() != 3 {
+		t.Errorf("expected 3 entries after eviction, got %d", m.Len())
+	}
+	if _, exists := m.Get("oldest"); exists {
+		t.Error("expected 'oldest' to be evicted after capacity exceeded")
+	}
+	// The other three should still be present.
+	for _, key := range []string{"middle", "newest", "fourth"} {
+		if _, exists := m.Get(key); !exists {
+			t.Errorf("expected key %q to be present after eviction", key)
+		}
+	}
+}
+
+func TestBoundedMap_SetWithTime_UpdateExisting(t *testing.T) {
+	m := provider.NewBoundedMapForTest(2, 0, 0)
+	m.SetForTest("key", time.Now().Add(-10*time.Second))
+
+	// Update with current time — should not increase Len.
+	m.Set("key")
+	if m.Len() != 1 {
+		t.Errorf("expected 1 entry after update, got %d", m.Len())
+	}
+	ts, exists := m.Get("key")
+	if !exists {
+		t.Fatal("expected key to exist after update")
+	}
+	if time.Since(ts) > 2*time.Second {
+		t.Errorf("expected timestamp to be updated to near-now, got %v ago", time.Since(ts))
+	}
+}
+
+// TestAutoClose_PathB_SinkCloserError_LogsError verifies that when autoCloseSucceededSinks
+// encounters a Close error and Log is non-nil, the error is logged (covers the Log.Error
+// branch inside autoCloseSucceededSinks).
+func TestAutoClose_PathB_SinkCloserError_LogsError(t *testing.T) {
+	obj := makeWatchedObject("svc-log-err", "default")
+	rjob := &v1alpha1.RemediationJob{
+		ObjectMeta: metav1.ObjectMeta{Name: "mechanic-logerr001", Namespace: agentNamespace},
+		Spec: v1alpha1.RemediationJobSpec{
+			SourceResultRef: v1alpha1.ResultRef{Name: "svc-log-err", Namespace: "default"},
+			Fingerprint:     "logerr001log002log003",
+			SourceType:      "native",
+			Finding:         v1alpha1.FindingSpec{Kind: "Deployment", Name: "svc-log-err", Namespace: "default"},
+			GitOpsRepo:      "org/repo",
+			AgentImage:      "img",
+			AgentSA:         "sa",
+		},
+		Status: v1alpha1.RemediationJobStatus{
+			Phase:   v1alpha1.PhaseSucceeded,
+			SinkRef: makeSinkRef("https://github.com/org/repo/pull/99"),
+		},
+	}
+	c := newTestClient(obj, rjob)
+	closer := &fakeSinkCloser{err: fmt.Errorf("close failed")}
+
+	logger, logs := newObserverInfoLogger()
+	p := &fakeSourceProvider{name: "fake", objectType: &corev1.ConfigMap{}, finding: nil}
+	r := &provider.SourceProviderReconciler{
+		Client: c,
+		Scheme: newTestScheme(),
+		Cfg: config.Config{
+			AgentNamespace: agentNamespace,
+			PRAutoClose:    true,
+		},
+		Provider:   p,
+		SinkCloser: closer,
+		Log:        logger,
+	}
+
+	_, err := r.Reconcile(context.Background(), reqFor("svc-log-err", "default"))
+	if err != nil {
+		t.Fatalf("expected nil error (close failure is non-fatal), got: %v", err)
+	}
+
+	// Verify the error was logged.
+	var found bool
+	for _, entry := range logs.All() {
+		if entry.ContextMap()["event"] == "sink.close_succeeded_failed" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected log entry with event=sink.close_succeeded_failed, got: %v", logs.All())
+	}
+}
+
+func TestBoundedMap_Get_TTLExpiry(t *testing.T) {
+	ttl := 50 * time.Millisecond
+	// Set cleanupInterval longer than ttl so cleanup hasn't run yet.
+	m := provider.NewBoundedMapForTest(10, ttl, 10*time.Minute)
+
+	m.Set("fresh")
+	m.SetForTest("stale", time.Now().Add(-2*ttl))
+
+	// Force needsCleanup to return true by setting lastCleanup far in the past.
+	m.SetLastCleanupForTest(time.Now().Add(-20 * time.Minute))
+
+	// "stale" should appear expired in Get even without a full cleanup.
+	if _, exists := m.Get("stale"); exists {
+		t.Error("expected stale key to appear expired in Get when cleanup is due")
+	}
+	// "fresh" was set just now — should still be present.
+	if _, exists := m.Get("fresh"); !exists {
+		t.Error("expected fresh key to still be present")
+	}
+}

@@ -97,6 +97,11 @@ const (
 	// ConditionCorrelationSuppressed is True when this job was suppressed because a
 	// correlated primary job handles the investigation for this finding group.
 	ConditionCorrelationSuppressed = "CorrelationSuppressed"
+
+	// ConditionPRRecorded is True once the watcher has observed a non-empty
+	// SinkRef.URL and incremented the prs_opened_total metric. Used as an
+	// idempotency gate so the metric is only incremented once per job.
+	ConditionPRRecorded = "PRRecorded"
 )
 
 // RemediationJobSpec defines the desired state of a RemediationJob.

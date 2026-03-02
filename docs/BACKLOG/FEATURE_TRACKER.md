@@ -691,8 +691,8 @@ live PR creation.
 | FT-I6 | Multi-cluster support | ★★★ | ●●● | Deferred |
 | FT-I7 | Jira / Linear ticket creation (investigation sink) | ★★ | ●● | Idea |
 | FT-I8 | GitOps tooling abstraction (Flux, ArgoCD, Helm-only) | ★★★ | ●● | Evaluated |
-| FT-I9 | PR / issue comment feedback and iteration loop | ★★★ | ●●● | Planned (epic27) |
-| FT-I10 | Manual investigation triggers (webhook, GitHub issue, Slack, Jira) | ★★★ | ●●● | Planned (epic28) |
+| FT-I9 | PR / issue comment feedback and iteration loop | ★★★ | ●●● | Deferred (epic27) |
+| FT-I10 | Manual investigation triggers (webhook, GitHub issue, Slack, Jira) | ★★★ | ●●● | Deferred (epic28) |
 
 ---
 
@@ -718,7 +718,7 @@ by `PR_AUTO_CLOSE` env var (default: `true`).
 
 ### FT-I9 — PR / issue comment feedback and iteration loop
 
-**Status: Planned (epic27, 2026-02-25)**
+**Status: Deferred (2026-03-02) — not planned for implementation in the near term.**
 
 **Problem:** When the agent opens a PR or issue, human reviewers leave comments,
 request changes, or point out that the fix is wrong. Today mechanic is deaf to all of
@@ -739,7 +739,7 @@ on the existing branch. Maximum iterations controlled by `FEEDBACK_MAX_ITERATION
 
 ### FT-I10 — Manual investigation triggers (webhook, GitHub issue, Slack, Jira)
 
-**Status: Planned (epic28, 2026-02-25)**
+**Status: Deferred (2026-03-02) — not planned for implementation in the near term.**
 
 **Problem:** All current `RemediationJob` sources are automatic — they fire only when a
 Kubernetes provider detects a problem. There is no way for an operator to request

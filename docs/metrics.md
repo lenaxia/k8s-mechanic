@@ -1,187 +1,152 @@
-# Cascade Prevention Metrics
+# Prometheus Metrics
 
-This document describes the Prometheus metrics exposed by the Mechanic cascade prevention system.
+Custom Prometheus metrics for the `mechanic-watcher` controller.
+All metrics are registered in `internal/metrics/metrics.go` with the
+controller-runtime default registry and exposed on `:8080/metrics`.
 
-## Overview
+Enable the Helm service and optional ServiceMonitor with:
 
-The cascade prevention metrics provide operational visibility into:
-- Circuit breaker activations and cooldowns
-- Chain depth distribution for self-remediations
-- Self-remediation success rates
-- Cascade suppression events and reasons
-
-## Available Metrics
-
-### Circuit Breaker Metrics
-
-#### `mechanic_circuit_breaker_activations_total`
-- **Type**: Counter
-- **Labels**: `provider`, `namespace`
-- **Description**: Total number of circuit breaker activations (trips)
-- **When incremented**: When a self-remediation is blocked due to circuit breaker cooldown
-
-#### `mechanic_circuit_breaker_cooldown_seconds`
-- **Type**: Gauge
-- **Labels**: `provider`, `namespace`
-- **Description**: Remaining cooldown time for circuit breaker in seconds
-- **Values**: 0 when no cooldown, positive when cooldown active
-
-### Chain Depth Metrics
-
-#### `mechanic_chain_depth_distribution`
-- **Type**: Histogram
-- **Labels**: `provider`, `namespace`
-- **Description**: Distribution of cascade chain depths
-- **Buckets**: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-- **When observed**: When a self-remediation with chain depth > 2 is processed
-
-#### `mechanic_max_depth_exceeded_total`
-- **Type**: Counter
-- **Labels**: `provider`, `namespace`, `depth`
-- **Description**: Total number of times maximum chain depth was exceeded
-- **When incremented**: When chain depth > 3 (configurable threshold)
-
-### Self-Remediation Metrics
-
-#### `mechanic_self_remediation_attempts_total`
-- **Type**: Counter
-- **Labels**: `provider`, `namespace`, `success`
-- **Description**: Total number of self-remediation attempts
-- **Success values**: `true` for successful attempts, `false` for failed attempts
-
-#### `mechanic_self_remediation_success_rate`
-- **Type**: Gauge
-- **Labels**: `provider`, `namespace`
-- **Description**: Success rate of self-remediation attempts (0.0 to 1.0)
-- **When updated**: After each self-remediation attempt completion
-
-### Cascade Suppression Metrics
-
-#### `mechanic_cascade_suppressions_total`
-- **Type**: Counter
-- **Labels**: `provider`, `namespace`, `suppression_type`
-- **Description**: Total number of cascade suppression events
-- **Suppression types**: `circuit_breaker`, `max_depth`, `stabilisation_window`
-
-#### `mechanic_cascade_suppression_reasons`
-- **Type**: Counter
-- **Labels**: `provider`, `namespace`, `reason`
-- **Description**: Count of cascade suppression reasons
-- **Reason examples**: `cooldown_active`, `chain_too_deep`, `window_active`
-
-## Example Prometheus Queries
-
-### Circuit Breaker Monitoring
-```promql
-# Circuit breaker activation rate (per minute)
-rate(mechanic_circuit_breaker_activations_total[5m])
-
-# Active circuit breaker cooldowns
-mechanic_circuit_breaker_cooldown_seconds > 0
-
-# Circuit breaker activations by provider
-sum by (provider) (rate(mechanic_circuit_breaker_activations_total[5m]))
-```
-
-### Chain Depth Analysis
-```promql
-# Average chain depth
-avg(mechanic_chain_depth_distribution_bucket)
-
-# Chain depth distribution percentiles
-histogram_quantile(0.95, sum(rate(mechanic_chain_depth_distribution_bucket[5m])) by (le))
-
-# Max depth violations
-sum(rate(mechanic_max_depth_exceeded_total[5m])) by (depth)
-```
-
-### Self-Remediation Success Tracking
-```promql
-# Current success rate by provider
-mechanic_self_remediation_success_rate
-
-# Success rate trend (30-minute moving average)
-avg_over_time(mechanic_self_remediation_success_rate[30m])
-
-# Total attempts by outcome
-sum by (success) (mechanic_self_remediation_attempts_total)
-```
-
-### Cascade Suppression Analysis
-```promql
-# Suppression rate by type
-sum by (suppression_type) (rate(mechanic_cascade_suppressions_total[5m]))
-
-# Top suppression reasons
-topk(5, sum by (reason) (rate(mechanic_cascade_suppression_reasons[5m])))
-
-# Suppression ratio (suppressions / total self-remediation attempts)
-sum(rate(mechanic_cascade_suppressions_total[5m])) / 
-sum(rate(mechanic_self_remediation_attempts_total[5m]))
-```
-
-## Alerting Examples
-
-### High Circuit Breaker Activation Rate
 ```yaml
-alert: HighCircuitBreakerActivationRate
-expr: rate(mechanic_circuit_breaker_activations_total[5m]) > 0.1
-for: 5m
-labels:
-  severity: warning
-annotations:
-  summary: "High circuit breaker activation rate"
-  description: "Circuit breaker is activating frequently, indicating potential cascade issues"
+metrics:
+  enabled: true          # creates the metrics Service
+serviceMonitor:
+  enabled: true          # creates the Prometheus ServiceMonitor (opt-in)
 ```
 
-### Low Self-Remediation Success Rate
-```yaml
-alert: LowSelfRemediationSuccessRate
-expr: mechanic_self_remediation_success_rate < 0.5
-for: 10m
-labels:
-  severity: critical
-annotations:
-  summary: "Low self-remediation success rate"
-  description: "Self-remediation success rate is below 50%"
+---
+
+## Metrics Reference
+
+### `mechanic_findings_dispatched_total` — CounterVec
+
+How many findings resulted in a `RemediationJob` being created.
+
+| Label | Values |
+|---|---|
+| `kind` | Kubernetes resource kind — e.g. `Deployment`, `Pod`, `Node`, `StatefulSet`, `PersistentVolumeClaim`, `Job` |
+| `severity` | `critical`, `high`, `medium`, `low` |
+
+**Increment site:** `internal/provider/provider.go` — after `r.Create(ctx, rjob)` succeeds.
+
+---
+
+### `mechanic_findings_suppressed_total` — CounterVec
+
+Findings that were filtered before a `RemediationJob` was created.
+
+| Label | Values |
+|---|---|
+| `reason` | see table below |
+
+| Reason | Description |
+|---|---|
+| `min_severity` | Below `MIN_SEVERITY` threshold |
+| `stabilisation_window` | Within the stabilisation window (first-seen or window still open) |
+| `duplicate` | Fingerprint already covered by an existing `RemediationJob` |
+| `parent_hierarchy` | Higher-hierarchy peer `RemediationJob` already exists |
+| `permanently_failed` | Fingerprint has a `PermanentlyFailed` tombstone |
+| `correlation_suppressed` | Suppressed as a non-primary member of a correlation group |
+| `injection_detected` | Prompt-injection pattern detected in finding fields |
+| `self_remediation_depth` | `ChainDepth` exceeds `SELF_REMEDIATION_MAX_DEPTH` |
+| `circuit_breaker` | Self-remediation circuit breaker is in cooldown |
+
+**Increment sites:** `internal/provider/provider.go` (all suppression paths),
+`internal/controller/remediationjob_controller.go` (`transitionSuppressed`).
+
+---
+
+### `mechanic_agent_jobs_active` — Gauge
+
+Current number of active (non-terminal) agent `batch/v1` Jobs.
+
+No labels. Set on every `concurrencyGate()` call in `RemediationJobReconciler`.
+
+---
+
+### `mechanic_agent_jobs_pending` — Gauge
+
+Current number of `RemediationJob` objects in `Pending` phase (waiting for a
+concurrency slot).
+
+No labels. Set alongside `agent_jobs_active` in `concurrencyGate()`.
+
+---
+
+### `mechanic_agent_job_duration_seconds` — GaugeVec
+
+Wall-clock duration of each agent Job from `DispatchedAt` to `CompletedAt`.
+Set once per terminal phase transition. The value persists in the time series
+until the watcher restarts, allowing post-processing of per-job durations.
+
+| Label | Values |
+|---|---|
+| `fingerprint` | 12-character short fingerprint |
+| `outcome` | `succeeded`, `failed`, `permanently_failed` |
+
+**Set site:** `internal/controller/remediationjob_controller.go` — on first
+transition into `PhaseSucceeded`, `PhaseFailed`, or `PhasePermanentlyFailed`.
+
+---
+
+### `mechanic_prs_opened_total` — Counter
+
+Total GitHub PRs opened by agent Jobs. Incremented exactly once per
+`RemediationJob` when `SinkRef.URL` transitions from empty to non-empty.
+Uses a `ConditionPRRecorded` condition on the CRD as an idempotency gate.
+
+No labels.
+
+**Increment site:** `internal/controller/remediationjob_controller.go` —
+`Reconcile()` PR-recorded guard block.
+
+---
+
+### `mechanic_prs_closed_total` — Counter
+
+Total GitHub PRs closed by the watcher's auto-close mechanism.
+
+No labels.
+
+**Increment site:** `internal/sink/github/closer.go` — after `closeItem`
+returns nil.
+
+---
+
+### `mechanic_circuit_breaker_activations_total` — Counter
+
+How many times the self-remediation circuit breaker blocked a cascade finding.
+A sustained high rate indicates the system is thrashing on its own fixes.
+
+No labels.
+
+**Increment site:** `internal/provider/provider.go` — in the `!allowed` branch
+after `r.CircuitBreaker.ShouldAllow()`.
+
+---
+
+## Example PromQL Queries
+
+```promql
+# Dispatch rate over the last 5 minutes, by resource kind
+rate(mechanic_findings_dispatched_total[5m])
+
+# Suppression breakdown
+sum by (reason) (rate(mechanic_findings_suppressed_total[5m]))
+
+# Ratio of suppressions to dispatches
+sum(rate(mechanic_findings_suppressed_total[5m]))
+  / sum(rate(mechanic_findings_dispatched_total[5m]))
+
+# Jobs currently blocked waiting for a concurrency slot
+mechanic_agent_jobs_pending
+
+# P95 job duration (approximation from GaugeVec — requires recording rule or
+# external processing; histograms are not used for this metric by design)
+topk(10, mechanic_agent_job_duration_seconds)
+
+# PR close rate
+rate(mechanic_prs_closed_total[1h])
+
+# Circuit breaker trip rate
+rate(mechanic_circuit_breaker_activations_total[1h])
 ```
-
-### Deep Cascade Chains
-```yaml
-alert: DeepCascadeChains
-expr: histogram_quantile(0.95, sum(rate(mechanic_chain_depth_distribution_bucket[5m])) by (le)) > 5
-for: 5m
-labels:
-  severity: warning
-annotations:
-  summary: "Deep cascade chains detected"
-  description: "95th percentile of chain depth exceeds 5"
-```
-
-## Implementation Details
-
-### Thread Safety
-All metrics updates are thread-safe using:
-- Prometheus atomic operations for counters and gauges
-- `sync.RWMutex` for internal success rate calculations
-- Controller-runtime's single-worker guarantee per reconciler
-
-### Performance Considerations
-- Metrics use vectorized operations (CounterVec, GaugeVec, etc.)
-- Label cardinality is limited to prevent metric explosion
-- Histogram buckets are optimized for typical chain depths (1-10)
-
-### Integration Points
-1. **Provider Reconciler** (`internal/provider/provider.go`):
-   - Records circuit breaker activations and cooldowns
-   - Tracks chain depth distribution
-   - Records cascade suppression events
-
-2. **RemediationJob Controller** (`internal/controller/remediationjob_controller.go`):
-   - Records self-remediation success/failure
-   - Updates success rate gauges
-
-3. **Metrics Package** (`internal/metrics/metrics.go`):
-   - Centralized metric definitions
-   - Thread-safe operations
-   - Registry integration

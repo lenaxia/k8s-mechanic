@@ -11,6 +11,7 @@ import (
 	v1alpha1 "github.com/lenaxia/k8s-mechanic/api/v1alpha1"
 	"github.com/lenaxia/k8s-mechanic/internal/domain"
 	igithub "github.com/lenaxia/k8s-mechanic/internal/github"
+	"github.com/lenaxia/k8s-mechanic/internal/metrics"
 )
 
 // Compile-time interface check.
@@ -78,7 +79,11 @@ func (c *GitHubSinkCloser) Close(ctx context.Context, rjob *v1alpha1.Remediation
 	_ = c.postComment(ctx, hc, base, token, ref.Repo, ref.Number, reason)
 
 	// Step 2: close the PR or issue.
-	return c.closeItem(ctx, hc, base, token, ref.Repo, ref.Number, ref.Type)
+	if err := c.closeItem(ctx, hc, base, token, ref.Repo, ref.Number, ref.Type); err != nil {
+		return err
+	}
+	metrics.RecordPRClosed()
+	return nil
 }
 
 // isClosed returns true if the GitHub issue/PR is already in "closed" state.

@@ -1,5 +1,7 @@
 # Epic 27: PR and Issue Feedback Iteration
 
+> **Status: Deferred (2026-03-02) — not planned for implementation in the near term.**
+
 ## Purpose
 
 When the agent opens a PR or issue, the interaction does not end there. Human reviewers

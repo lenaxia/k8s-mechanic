@@ -67,8 +67,8 @@ func New(cfg Config) (*Builder, error) {
 }
 
 // containerResources returns a ResourceRequirements using the configured limits.
-// A panic here means the calling code supplied an invalid quantity string; this
-// is a programmer error that should be caught in tests before production.
+// Quantity strings are validated by config.FromEnv before reaching here, so
+// MustParse will not panic in practice.
 func (b *Builder) containerResources() corev1.ResourceRequirements {
 	return corev1.ResourceRequirements{
 		Requests: corev1.ResourceList{
@@ -191,6 +191,18 @@ func (b *Builder) Build(rjob *v1alpha1.RemediationJob, correlatedFindings []v1al
 			{Name: "GITOPS_REPO", Value: rjob.Spec.GitOpsRepo},
 			{Name: "GITOPS_MANIFEST_ROOT", Value: rjob.Spec.GitOpsManifestRoot},
 			{Name: "SINK_TYPE", Value: rjob.Spec.SinkType},
+			// Self-remediation context — used by core.txt prompt section.
+			// IS_SELF_REMEDIATION is "true" when ChainDepth > 0 (this job is a cascade).
+			// CHAIN_DEPTH is the numeric depth of the self-remediation chain (0 for normal jobs).
+			// TARGET_REPO_OVERRIDE is reserved for future use; always empty today.
+			{Name: "IS_SELF_REMEDIATION", Value: func() string {
+				if rjob.Spec.Finding.ChainDepth > 0 {
+					return "true"
+				}
+				return "false"
+			}()},
+			{Name: "CHAIN_DEPTH", Value: fmt.Sprintf("%d", rjob.Spec.Finding.ChainDepth)},
+			{Name: "TARGET_REPO_OVERRIDE", Value: ""},
 			{
 				Name: "AGENT_PROVIDER_CONFIG",
 				ValueFrom: &corev1.EnvVarSource{

@@ -1,5 +1,7 @@
 # Epic 28: Manual Investigation Triggers
 
+> **Status: Deferred (2026-03-02) — not planned for implementation in the near term.**
+
 ## Purpose
 
 All current `RemediationJob` sources are automatic — a provider watches a Kubernetes

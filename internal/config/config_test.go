@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -1754,5 +1755,110 @@ func TestFromEnv_ExtraRedactPatterns(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// --- Resource quantity validation ---
+
+// setRequiredEnvForQuantity sets the minimum required env vars for FromEnv to succeed.
+// Uses t.Setenv so all values are cleaned up after the test.
+func setRequiredEnvForQuantity(t *testing.T) {
+	t.Helper()
+	t.Setenv("GITOPS_REPO", "org/repo")
+	t.Setenv("GITOPS_MANIFEST_ROOT", "kubernetes/")
+	t.Setenv("AGENT_IMAGE", "ghcr.io/lenaxia/mechanic-agent:latest")
+	t.Setenv("AGENT_NAMESPACE", "mechanic")
+	t.Setenv("AGENT_SA", "mechanic-agent")
+}
+
+func TestFromEnv_ResourceQuantities_ValidValues(t *testing.T) {
+	tests := []struct {
+		name       string
+		cpuRequest string
+		memRequest string
+		cpuLimit   string
+		memLimit   string
+	}{
+		{"defaults", "", "", "", ""},
+		{"explicit valid", "250m", "256Mi", "1", "1Gi"},
+		{"integer cpu", "2", "512Mi", "4", "2Gi"},
+		{"millicpu", "500m", "64Mi", "1000m", "128Mi"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setRequiredEnvForQuantity(t)
+			if tt.cpuRequest != "" {
+				t.Setenv("AGENT_CPU_REQUEST", tt.cpuRequest)
+			} else {
+				os.Unsetenv("AGENT_CPU_REQUEST")
+			}
+			if tt.memRequest != "" {
+				t.Setenv("AGENT_MEM_REQUEST", tt.memRequest)
+			} else {
+				os.Unsetenv("AGENT_MEM_REQUEST")
+			}
+			if tt.cpuLimit != "" {
+				t.Setenv("AGENT_CPU_LIMIT", tt.cpuLimit)
+			} else {
+				os.Unsetenv("AGENT_CPU_LIMIT")
+			}
+			if tt.memLimit != "" {
+				t.Setenv("AGENT_MEM_LIMIT", tt.memLimit)
+			} else {
+				os.Unsetenv("AGENT_MEM_LIMIT")
+			}
+			if _, err := config.FromEnv(); err != nil {
+				t.Fatalf("unexpected error for valid quantities: %v", err)
+			}
+		})
+	}
+}
+
+func TestFromEnv_ResourceQuantities_InvalidValues(t *testing.T) {
+	envNames := []string{
+		"AGENT_CPU_REQUEST",
+		"AGENT_MEM_REQUEST",
+		"AGENT_CPU_LIMIT",
+		"AGENT_MEM_LIMIT",
+	}
+	invalidValues := []string{"banana", "500 m", "1GB", "1.5.0"}
+	for _, envName := range envNames {
+		for _, bad := range invalidValues {
+			t.Run(fmt.Sprintf("%s=%s", envName, bad), func(t *testing.T) {
+				setRequiredEnvForQuantity(t)
+				t.Setenv(envName, bad)
+				_, err := config.FromEnv()
+				if err == nil {
+					t.Fatalf("expected error for %s=%q, got nil", envName, bad)
+				}
+				if !strings.Contains(err.Error(), envName) {
+					t.Errorf("error message should mention %s, got: %v", envName, err)
+				}
+			})
+		}
+	}
+}
+
+func TestFromEnv_ResourceQuantities_DefaultsAreValid(t *testing.T) {
+	setRequiredEnvForQuantity(t)
+	os.Unsetenv("AGENT_CPU_REQUEST")
+	os.Unsetenv("AGENT_MEM_REQUEST")
+	os.Unsetenv("AGENT_CPU_LIMIT")
+	os.Unsetenv("AGENT_MEM_LIMIT")
+	cfg, err := config.FromEnv()
+	if err != nil {
+		t.Fatalf("defaults should be valid quantities: %v", err)
+	}
+	if cfg.AgentCPURequest != "100m" {
+		t.Errorf("AgentCPURequest default = %q, want %q", cfg.AgentCPURequest, "100m")
+	}
+	if cfg.AgentMemRequest != "128Mi" {
+		t.Errorf("AgentMemRequest default = %q, want %q", cfg.AgentMemRequest, "128Mi")
+	}
+	if cfg.AgentCPULimit != "500m" {
+		t.Errorf("AgentCPULimit default = %q, want %q", cfg.AgentCPULimit, "500m")
+	}
+	if cfg.AgentMemLimit != "512Mi" {
+		t.Errorf("AgentMemLimit default = %q, want %q", cfg.AgentMemLimit, "512Mi")
 	}
 }

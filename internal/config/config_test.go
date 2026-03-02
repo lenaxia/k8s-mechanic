@@ -465,57 +465,6 @@ func TestFromEnv_ConfigValidationEdgeCases(t *testing.T) {
 	}
 }
 
-// TestFromEnv_LLMProviderDefault tests that LLM_PROVIDER defaults to empty string (disabled).
-func TestFromEnv_LLMProviderDefault(t *testing.T) {
-	setRequiredEnv(t)
-	os.Unsetenv("LLM_PROVIDER")
-
-	cfg, err := config.FromEnv()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if cfg.LLMProvider != "" {
-		t.Errorf("LLMProvider default: got %q, want %q", cfg.LLMProvider, "")
-	}
-}
-
-// TestFromEnv_LLMProviderValidValues tests each accepted LLM_PROVIDER value.
-func TestFromEnv_LLMProviderValidValues(t *testing.T) {
-	for _, provider := range []string{"openai"} {
-		t.Run(provider, func(t *testing.T) {
-			setRequiredEnv(t)
-			t.Setenv("LLM_PROVIDER", provider)
-
-			cfg, err := config.FromEnv()
-			if err != nil {
-				t.Fatalf("unexpected error for LLM_PROVIDER=%q: %v", provider, err)
-			}
-			if cfg.LLMProvider != provider {
-				t.Errorf("LLMProvider: got %q, want %q", cfg.LLMProvider, provider)
-			}
-		})
-	}
-}
-
-// TestFromEnv_LLMProviderUnimplementedValues tests that reserved-but-unimplemented
-// providers are rejected at startup with a clear error.
-func TestFromEnv_LLMProviderUnimplementedValues(t *testing.T) {
-	for _, provider := range []string{"bedrock", "vertex"} {
-		t.Run(provider, func(t *testing.T) {
-			setRequiredEnv(t)
-			t.Setenv("LLM_PROVIDER", provider)
-
-			_, err := config.FromEnv()
-			if err == nil {
-				t.Fatalf("expected error for unimplemented LLM_PROVIDER=%q, got nil", provider)
-			}
-			if !strings.Contains(err.Error(), "not yet implemented") {
-				t.Errorf("error should say 'not yet implemented', got: %v", err)
-			}
-		})
-	}
-}
-
 // TestFromEnv_ConsistencyValidation tests validation of configuration consistency
 func TestFromEnv_ConsistencyValidation(t *testing.T) {
 	tests := []struct {

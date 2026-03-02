@@ -38,11 +38,6 @@
         "sinkType": {
           "type": "string"
         },
-        "llmProvider": {
-          "type": "string",
-          "enum": ["", "openai"],
-          "description": "LLM readiness gate. 'openai' enables it; empty disables."
-        },
         "injectionDetectionAction": {
           "type": "string",
           "enum": ["log", "suppress"]

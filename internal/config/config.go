@@ -36,14 +36,11 @@ type Config struct {
 	DisableCascadeCheck       bool          // DISABLE_CASCADE_CHECK — default false
 	CascadeNamespaceThreshold int           // CASCADE_NAMESPACE_THRESHOLD — default 50
 	CascadeNodeCacheTTL       time.Duration // CASCADE_NODE_CACHE_TTL_SECONDS — default 30s
-	// LLMProvider selects the LLM readiness checker used to gate RemediationJob
-	// creation. Accepted values: "openai". Empty (default) disables the check.
-	LLMProvider              string   // LLM_PROVIDER — default "" (disabled)
-	InjectionDetectionAction string   // INJECTION_DETECTION_ACTION — "log" (default) or "suppress"
-	AgentRBACScope           string   // AGENT_RBAC_SCOPE — "cluster" (default) or "namespace"
-	AgentWatchNamespaces     []string // AGENT_WATCH_NAMESPACES — required when scope is "namespace"
-	WatchNamespaces          []string // WATCH_NAMESPACES — default nil (allow all)
-	ExcludeNamespaces        []string // EXCLUDE_NAMESPACES — default nil (deny none)
+	InjectionDetectionAction  string        // INJECTION_DETECTION_ACTION — "log" (default) or "suppress"
+	AgentRBACScope            string        // AGENT_RBAC_SCOPE — "cluster" (default) or "namespace"
+	AgentWatchNamespaces      []string      // AGENT_WATCH_NAMESPACES — required when scope is "namespace"
+	WatchNamespaces           []string      // WATCH_NAMESPACES — default nil (allow all)
+	ExcludeNamespaces         []string      // EXCLUDE_NAMESPACES — default nil (deny none)
 	// MaxInvestigationRetries is the maximum number of times a RemediationJob's
 	// owned batch/v1 Job may fail before the RemediationJob is permanently
 	// tombstoned. Populated from MAX_INVESTIGATION_RETRIES env var; default 3.
@@ -192,25 +189,6 @@ func FromEnv() (Config, error) {
 			return Config{}, fmt.Errorf("STABILISATION_WINDOW_SECONDS must be >= 0, got %d", n)
 		}
 		cfg.StabilisationWindow = time.Duration(n) * time.Second
-	}
-
-	// LLM provider selection — empty string disables the LLM readiness check.
-	// bedrock and vertex are reserved for future implementation; configuring them
-	// is a startup error rather than a silent runtime block.
-	cfg.LLMProvider = os.Getenv("LLM_PROVIDER")
-	switch cfg.LLMProvider {
-	case "", "openai":
-		// valid
-	case "bedrock", "vertex":
-		return Config{}, fmt.Errorf(
-			"LLM_PROVIDER=%q is not yet implemented; set LLM_PROVIDER=openai or leave it unset to disable the LLM readiness check",
-			cfg.LLMProvider,
-		)
-	default:
-		return Config{}, fmt.Errorf(
-			"LLM_PROVIDER %q is not supported; accepted values: openai (or unset to disable)",
-			cfg.LLMProvider,
-		)
 	}
 
 	action := os.Getenv("INJECTION_DETECTION_ACTION")

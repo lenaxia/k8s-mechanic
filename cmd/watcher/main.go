@@ -151,7 +151,7 @@ func main() {
 
 	// Build the readiness checker that gates RemediationJob creation.
 	// The sink checker is selected by SINK_TYPE; unset/unknown = NopChecker.
-	// The LLM checker is selected by LLM_PROVIDER; unset = NopChecker (disabled).
+	// The LLM checker always validates that llm-credentials-<agentType> exists.
 	// provider.ReadinessCacheTTL is used for both the cache TTL and the requeue
 	// interval on failure, ensuring the cache is always expired before retry.
 
@@ -168,17 +168,10 @@ func main() {
 			zap.String("sinkType", cfg.SinkType))
 	}
 
-	var llmChecker readiness.Checker
-	switch cfg.LLMProvider {
-	case "openai":
-		llmChecker = readiness.NewCachedChecker(
-			llm.NewOpenAIChecker(mgr.GetClient(), cfg.AgentNamespace, string(cfg.AgentType)),
-			provider.ReadinessCacheTTL,
-		)
-	default:
-		llmChecker = readiness.NewNopChecker("llm")
-		logger.Info("LLM_PROVIDER not set; LLM readiness check disabled")
-	}
+	llmChecker := readiness.NewCachedChecker(
+		llm.NewOpenAIChecker(mgr.GetClient(), cfg.AgentNamespace, string(cfg.AgentType)),
+		provider.ReadinessCacheTTL,
+	)
 
 	combinedChecker := readiness.All(sinkChecker, llmChecker)
 

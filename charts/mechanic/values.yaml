@@ -36,11 +36,6 @@ watcher:
   # -- Sink type for PR creation. Currently only "github" is supported.
   sinkType: github
 
-  # -- LLM readiness gate. Set to "openai" to block RemediationJob creation until
-  # the llm-credentials-<agent.type> Secret exists (e.g. llm-credentials-opencode).
-  # Leave empty to disable the readiness gate.
-  llmProvider: "openai"
-
   # -- Action when a prompt injection heuristic fires.
   # One of "log" (default) or "suppress" (silently drops the finding).
   injectionDetectionAction: "log"

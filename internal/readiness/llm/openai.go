@@ -1,14 +1,10 @@
 // Package llm provides readiness checkers for LLM backend dependencies.
 // Each checker validates that the required Kubernetes Secret exists with the
-// expected keys. Secret names and key names are derived from the agentType
+// expected keys. The secret name is derived from the agentType
 // (e.g. "llm-credentials-opencode" for agentType="opencode").
 //
-// Checkers are selected by the LLM_PROVIDER config field:
-//
-//	LLM_PROVIDER=openai   → OpenAIChecker
-//	LLM_PROVIDER=bedrock  → reserved (not yet implemented; rejected at startup)
-//	LLM_PROVIDER=vertex   → reserved (not yet implemented; rejected at startup)
-//	(unset)               → NopChecker (gate disabled)
+// OpenAIChecker is the active implementation. BedrockChecker and VertexChecker
+// are stubs retained for future use.
 package llm
 
 import (

@@ -52,8 +52,6 @@ spec:
           value: {{ .Values.watcher.stabilisationWindowSeconds | quote }}
         - name: AGENT_TYPE
           value: {{ .Values.agent.type | quote }}
-        - name: LLM_PROVIDER
-          value: {{ .Values.watcher.llmProvider | quote }}
         - name: INJECTION_DETECTION_ACTION
           value: {{ .Values.watcher.injectionDetectionAction | quote }}
         - name: MAX_INVESTIGATION_RETRIES

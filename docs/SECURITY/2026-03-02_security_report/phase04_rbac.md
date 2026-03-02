@@ -1,118 +1,54 @@
 # Phase 4: RBAC Enforcement Testing
 
-**Date run:**
-**Reviewer:**
-**Cluster:** yes / no — if no, mark all tests SKIPPED
+**Date run:** 2026-03-02
+**Reviewer:** automated (k8s-mechanic security process)
+**Cluster:** no — all tests SKIPPED
 
 ---
 
 ## 4.1 Default Cluster Scope — Secret Read
 
-**Status:** Executed / SKIPPED — reason: ______
+**Status:** SKIPPED — no live cluster available
 
-```bash
-kubectl auth can-i get secret/rbac-test-secret -n default \
-  --as=system:serviceaccount:mechanic:mechanic-agent
-```
-```
-<!-- paste output -->
-```
-
-```bash
-kubectl get secret rbac-test-secret -n default \
-  --as=system:serviceaccount:mechanic:mechanic-agent -o yaml
-```
-```
-<!-- paste output -->
-```
-
-| Check | Expected | Actual | Pass? |
-|-------|----------|--------|-------|
-| Agent can read Secret (cluster scope) | yes | | |
-
-**Note:** This result is EXPECTED to be "yes" — it is accepted residual risk AR-01.
-Record it as a confirmed accepted risk, not a defect.
+**Notes:** This test confirms accepted residual risk AR-01. The `mechanic-agent`
+ClusterRole grants `get/list/watch` on a fixed resource list that does not include
+`secrets`. Expected result when run: agent cannot read Secrets. This is a change from
+the original AR-01 acceptance — the current ClusterRole explicitly excludes secrets
+(only the old 2026-02-23 role granted them). To be confirmed in next live cluster review.
 
 ---
 
 ## 4.2 Namespace Scope — Secret Read Restriction
 
-**Status:** Executed / SKIPPED — reason: ______
+**Status:** SKIPPED — no live cluster available
 
-```bash
-# Out-of-scope namespace — should be forbidden
-kubectl auth can-i get secret -n production \
-  --as=system:serviceaccount:mechanic:mechanic-agent-ns
-```
-```
-<!-- paste output -->
-```
-
-```bash
-# In-scope namespace — should be allowed
-kubectl auth can-i get secret -n default \
-  --as=system:serviceaccount:mechanic:mechanic-agent-ns
-```
-```
-<!-- paste output -->
-```
-
-| Check | Expected | Actual | Pass? |
-|-------|----------|--------|-------|
-| Secret read blocked in out-of-scope namespace | no | | |
-| Secret read allowed in in-scope namespace | yes | | |
+**Notes:** The `role-agent-ns.yaml` overlay currently uses `resources: ["*"]` which
+would cause this test to FAIL (see finding 2026-03-02-002). This test should be re-run
+after the finding is remediated to confirm restriction is effective.
 
 ---
 
 ## 4.3 Agent Write Restriction
 
-**Status:** Executed / SKIPPED — reason: ______
+**Status:** SKIPPED — no live cluster available
 
-```bash
-kubectl auth can-i create pod -n default \
-  --as=system:serviceaccount:mechanic:mechanic-agent
-kubectl auth can-i create deployment -n default \
-  --as=system:serviceaccount:mechanic:mechanic-agent
-kubectl auth can-i create pods/exec -n default \
-  --as=system:serviceaccount:mechanic:mechanic-agent
-kubectl auth can-i get nodes/proxy \
-  --as=system:serviceaccount:mechanic:mechanic-agent
-```
-```
-<!-- paste output -->
-```
-
-| Check | Expected | Actual | Pass? |
-|-------|----------|--------|-------|
-| Cannot create pods | no | | |
-| Cannot create deployments | no | | |
-| Cannot exec into pods | no | | |
-| Cannot access nodes/proxy | no | | |
+**Notes:** Static review of ClusterRole confirms no write verbs, no `pods/exec`, no
+`nodes/proxy`. Expected result: all write checks blocked.
 
 ---
 
 ## 4.4 Watcher Escalation Paths
 
-**Status:** Executed / SKIPPED — reason: ______
+**Status:** SKIPPED — no live cluster available
 
-```bash
-kubectl auth can-i get secret -n default \
-  --as=system:serviceaccount:mechanic:mechanic-watcher
-kubectl auth can-i delete remediationjob -n kube-system \
-  --as=system:serviceaccount:mechanic:mechanic-watcher
-```
-```
-<!-- paste output -->
-```
-
-| Check | Expected | Actual | Pass? |
-|-------|----------|--------|-------|
-| Watcher cannot read Secrets | no | | |
-| Watcher cannot delete RemediationJobs outside mechanic ns | no | | |
+**Notes:** Watcher ClusterRole retains `secrets: get/list/watch` (AR-08, finding
+2026-02-27-001). Expected watcher-secret-read result: allowed (until AR-08 is resolved
+by live cluster test confirming namespace Role is sufficient).
 
 ---
 
 ## Phase 4 Summary
 
 **Total findings:** 0
-**Findings added to findings.md:** (list IDs)
+**Findings added to findings.md:** none
+**All tests SKIPPED — no live cluster. Schedule for next review.**

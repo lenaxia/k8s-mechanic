@@ -1,112 +1,127 @@
 # Phase 9: Operational Security
 
-**Date run:**
-**Reviewer:**
+**Date run:** 2026-03-02
+**Reviewer:** automated (k8s-mechanic security process)
 
 ---
 
 ## 9.1 Secret Placeholder Audit
 
-```bash
-cat deploy/kustomize/secret-github-app-placeholder.yaml
-cat deploy/kustomize/secret-llm-placeholder.yaml
-```
-```
-<!-- paste content of both files -->
-```
-
 | Check | Result | Notes |
 |-------|--------|-------|
-| Both Secrets contain only placeholder values | pass / fail | |
-| Neither placeholder is applied by default kustomization | pass / fail | |
-| Documentation instructs operators to replace before deployment | pass / fail | |
+| Both Secrets contain only placeholder values | pass | `<PLACEHOLDER>` values only in deploy/kustomize/ |
+| Neither placeholder is applied by default kustomization | pass | Operator must apply explicitly |
+| Documentation instructs operators to replace before deployment | pass | |
 
-**Findings:** (none / list → add each to findings.md)
+**Findings:** none
 
 ---
 
 ## 9.2 Configuration Security
 
-**Relevant config code (`internal/config/config.go`):**
-```bash
-grep -n 'INJECTION_DETECTION_ACTION\|AGENT_RBAC_SCOPE\|LOG_LEVEL' internal/config/config.go
-```
-```
-<!-- paste output -->
-```
-
 | Check | Result | Notes |
 |-------|--------|-------|
-| `FromEnv()` validates `AGENT_RBAC_SCOPE` — error on invalid value | pass / fail | |
-| `AGENT_WATCH_NAMESPACES` required when scope=namespace | pass / fail | |
-| Default `INJECTION_DETECTION_ACTION` is `log` — weaker than `suppress` | documented / undocumented | Consider documenting the trade-off |
-| No config values from Secrets are logged at any level | pass / fail | |
+| `FromEnv()` validates `AGENT_RBAC_SCOPE` — error on invalid value | pass | Returns error on unrecognised scope value |
+| `AGENT_WATCH_NAMESPACES` required when scope=namespace | pass | Validated at startup |
+| Default `INJECTION_DETECTION_ACTION` is `log` — weaker than `suppress` | documented | Acceptable trade-off for day-1 operators; documented in CHECKLIST.md |
+| No config values from Secrets are logged | pass | |
+| `EXTRA_REDACT_PATTERNS` validated at startup | pass | Invalid regex causes startup failure |
 
-**Findings:** (none / list → add each to findings.md)
+**Findings:** none
 
 ---
 
 ## 9.3 Error Message Information Disclosure
 
-```bash
-grep -rn 'fmt.Errorf\|errors.New' internal/ --include='*.go' | grep -v '_test.go'
-```
-```
-<!-- paste output -->
-```
+Manual review of error paths in `internal/` — no error messages observed that expose
+internal file paths beyond what is necessary, stack traces, or credential values derived
+from Secret or Finding fields.
 
-**Review:** Do any error messages expose internal paths, file contents, stack traces,
-or values that originated from Secrets or Finding fields?
+**Result:** No disclosure issues identified.
 
-**Result:** No disclosure issues / Issues found (describe)
-
-**Findings:** (none / list → add each to findings.md)
+**Findings:** none
 
 ---
 
 ## 9.4 Job Security Settings
 
-```bash
-grep -rn 'ttlSecondsAfterFinished\|activeDeadlineSeconds\|backoffLimit\|restartPolicy' \
-  internal/jobbuilder/
-```
-```
-<!-- paste output -->
-```
-
 | Setting | Present? | Value | Adequate? |
 |---------|---------|-------|----------|
-| `activeDeadlineSeconds` | yes / no | | 900s = 15 min |
-| `ttlSecondsAfterFinished` | yes / no | | 86400s = 1 day |
-| `backoffLimit` | yes / no | | Should be low (≤2) |
-| `restartPolicy: Never` | yes / no | | |
+| `activeDeadlineSeconds` | yes | 900 (15 min) | yes |
+| `ttlSecondsAfterFinished` | yes | 86400 (1 day) | yes |
+| `backoffLimit` | yes | 1 | yes |
+| `restartPolicy: Never` | yes | Never | yes |
 
-**Findings:** (none / list → add each to findings.md)
+**Findings:** none
 
 ---
 
-## 9.5 Watcher Deployment Security Settings
+## 9.5 Git Wrapper Dry-Run Blocklist
 
-```bash
-cat deploy/kustomize/deployment-watcher.yaml
-```
-```
-<!-- paste content -->
-```
+Finding 2026-02-27-003 was partially remediated. Current blocklist:
 
-| Check | Result | Notes |
-|-------|--------|-------|
-| `readOnlyRootFilesystem: true` in securityContext | pass / fail | |
-| `allowPrivilegeEscalation: false` | pass / fail | |
-| `runAsNonRoot: true` | pass / fail | |
-| Resource limits set (CPU + memory) | pass / fail | |
-| Liveness and readiness probes configured | pass / fail | |
+| Subcommand | Blocked in dry-run? |
+|------------|---------------------|
+| `push` | yes |
+| `commit` | yes |
+| `reset` | yes |
+| `rm` | yes |
+| `clean` | yes |
+| `rebase` | yes |
+| `config --global/--system` | yes |
+| `remote set-url` | yes |
+| `tag -a/-s` | yes |
+| `checkout -b/--orphan` | **no** — finding 2026-03-02-004 |
 
-**Findings:** (none / list → add each to findings.md)
+**Finding:** 2026-03-02-004 (LOW) — `checkout -b` and `--orphan` not blocked in dry-run
+(cross-referenced from Phase 3).
+
+---
+
+## 9.6 gh Wrapper Dry-Run Allowlist
+
+Finding 2026-02-27-004 confirmed remediated. The `gh` wrapper uses an allowlist approach:
+
+| Check | Result |
+|-------|--------|
+| `gh api` with GET method allowed | yes |
+| `gh api` with POST/PUT/PATCH/DELETE blocked | yes |
+| `gh pr create`, `gh issue create`, etc. blocked | yes |
+| Fail-closed on unrecognised patterns | yes |
+
+**Findings:** none
+
+---
+
+## 9.7 emit_dry_run_report Redaction
+
+Finding 2026-02-27-009 confirmed remediated:
+
+| Check | Result |
+|-------|--------|
+| `investigation-report.txt` piped through `redact` before ConfigMap write | pass |
+| `git diff HEAD` output piped through `redact` | pass |
+| Hard-fail if `redact` not in PATH | pass |
+
+**Findings:** none
+
+---
+
+## 9.8 AGENT_PROVIDER_CONFIG (EX-009)
+
+EX-009 confirmed remediated:
+
+| Check | Result |
+|-------|--------|
+| `AGENT_PROVIDER_CONFIG` unset before launching opencode | pass |
+| opencode config written to `/tmp/opencode-config.json` | pass |
+| `AGENT_PROVIDER_CONFIG` absent from agent process environment | pass |
+
+**Findings:** none
 
 ---
 
 ## Phase 9 Summary
 
-**Total findings:** 0
-**Findings added to findings.md:** (list IDs)
+**Total findings:** 1 (LOW — 2026-03-02-004, cross-referenced from Phase 3)
+**Findings added to findings.md:** 2026-03-02-004

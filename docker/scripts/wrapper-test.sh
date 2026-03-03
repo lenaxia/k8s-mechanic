@@ -265,6 +265,7 @@ check_write_blocked create deployment foo --image=nginx
 check_write_blocked delete pod foo
 check_write_blocked edit deployment foo
 check_write_blocked patch deployment foo -p '{}'
+check_write_blocked patch remediationjob mechanic-abc123 --namespace default --type=merge --patch '{}'
 check_write_blocked replace -f manifest.yaml
 check_write_blocked scale deployment foo --replicas=3
 check_write_blocked set image deployment/foo container=nginx:latest
@@ -284,6 +285,9 @@ check_write_allowed logs foo
 check_write_allowed diff -f manifest.yaml
 check_write_allowed rollout status deployment/foo
 check_write_allowed rollout history deployment/foo
+# remediationjob/status self-report patch — narrow exception (must be allowed)
+check_write_allowed patch remediationjob mechanic-abc --namespace default --subresource=status --type=merge --patch '{"status":{"prRef":"https://github.com/org/repo/pull/1"}}'
+check_write_allowed patch remediationjobs/mechanic-abc --namespace default --subresource=status --type=merge --patch '{}'
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── Tier 2 hardened-mode tests ────────────────────────────────────────────────

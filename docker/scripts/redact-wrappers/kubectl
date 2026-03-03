@@ -17,8 +17,31 @@ _subcmd="${1:-}"
 _blocked_write="false"
 
 case "$_subcmd" in
-    apply|create|delete|edit|patch|replace|scale|set|label|annotate|taint|drain|cordon|uncordon)
+    apply|create|delete|edit|replace|scale|set|label|annotate|taint|drain|cordon|uncordon)
         _blocked_write="true"
+        ;;
+    patch)
+        # Allow exactly one narrow exception: patching the remediationjob/status
+        # subresource so the agent can self-report PR info back to the controller.
+        # All other patch targets remain blocked.
+        _is_rjob_status_patch="false"
+        _has_subresource_status="false"
+        _resource_arg=""
+        for _a in "$@"; do
+            case "$_a" in
+                --subresource=status) _has_subresource_status="true" ;;
+            esac
+        done
+        # Second positional arg (after "patch") is the resource type or resource/name.
+        _resource_arg="${2:-}"
+        case "$_resource_arg" in
+            remediationjob|remediationjobs|"remediationjob/"*|"remediationjobs/"*)
+                _is_rjob_status_patch="true"
+                ;;
+        esac
+        if [ "$_is_rjob_status_patch" = "false" ] || [ "$_has_subresource_status" = "false" ]; then
+            _blocked_write="true"
+        fi
         ;;
     rollout)
         case "${2:-}" in

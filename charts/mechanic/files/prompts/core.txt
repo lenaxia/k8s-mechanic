@@ -229,7 +229,7 @@ commented on in STEP 1 — write the PR reference back to the RemediationJob sta
 subresource. This enables the watcher to auto-close the PR when the underlying issue
 resolves.
 
-RJOB_NAME="mechanic-${FINDING_FINGERPRINT:0:12}"
+RJOB_NAME="mechanic-${FINDING_FINGERPRINT}"
 RJOB_NAMESPACE="${AGENT_NAMESPACE}"
 
 Capture PR_URL and PR_NUMBER:

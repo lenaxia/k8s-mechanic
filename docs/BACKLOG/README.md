@@ -33,7 +33,9 @@ the epic and individual story files for each unit of work.
 | epic12 — Security Review | [epic12-security-review/](epic12-security-review/) | Secret redaction, network policy, audit log, RBAC scoping, prompt injection hardening | epic01, epic02, epic04, epic05, epic09 | Not Started |
 | epic13 — Multi-Signal Correlation | [epic13-multi-signal-correlation/](epic13-multi-signal-correlation/) | Correlate related findings into a single investigation via a CorrelationWindow | epic01, epic02, epic09, epic11 | Not Started |
 | epic14 — Test Infrastructure Correctness | [epic14-test-infrastructure/](epic14-test-infrastructure/) | Fix CRD schema drift and envtest isolation defects; document rules to prevent recurrence | epic13 | Not Started |
-
+| epic29 — Mechanic Operational Improvements | [epic29-mechanic-improvements/](epic29-mechanic-improvements/) | Tiered response, node health correlation, infrastructure cascade detection, failure analysis | — | Not Started |
+| epic30 — Production Debug and Incident Recovery | [epic30-production-debug/](epic30-production-debug/) | Emergency cleanup, root cause investigation, job lifecycle improvements, automatic cleanup, observability, timeout/retry strategies, configuration tuning | — | Not Started |
+| 
 ## Implementation Order
 
 ```
@@ -54,6 +56,8 @@ epic11-self-remediation-cascade (depends on epic01, epic02, epic04)
 epic12-security-review (depends on epic01, epic02, epic04, epic05, epic09)
 epic13-multi-signal-correlation (depends on epic01, epic02, epic09, epic11)
 epic14-test-infrastructure (depends on epic13)
+epic29-mechanic-improvements (depends on epic09, epic11, epic13)
+epic30-production-debug (depends on epic01, epic02, epic04)
 ```
 
 ## Feature Tracker

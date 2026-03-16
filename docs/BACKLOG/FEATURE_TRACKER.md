@@ -52,9 +52,10 @@ a feature is approved for implementation:
 | FT-A5 | Recurrence memory — reuse prior fix context | ★★★ | ●● | Evaluated |
 | FT-A6 | Multi-signal correlation (related findings) | ★★★ | ●●● | Deferred (epic13) |
 | FT-A7 | GitOps drift detection source provider | ★★★ | ●● | Evaluated |
-| FT-A8 | False-positive feedback annotation | ★★★ | ●● | Evaluated |
-| FT-A9 | Mandatory pre-PR manifest validation | ★★★ | ● | Complete (epic18) |
-| FT-A10 | Blast radius estimation before PR | ★★ | ●● | Evaluated |
+ | FT-A8 | False-positive feedback annotation | ★★★ | ●● | Evaluated |
+ | FT-A9 | Mandatory pre-PR manifest validation | ★★★ | ● | Complete (epic18) |
+ | FT-A10 | Blast radius estimation before PR | ★★ | ●● | Evaluated |
+ | FT-A11 | Tiered response system with infrastructure filtering | ★★★ | ●● | Planned (epic29) |
 
 ---
 
@@ -320,8 +321,43 @@ add the label "high-blast-radius" to the PR and reduce confidence to "low" regar
 of your assessment of the fix correctness.
 ```
 
-Zero Go code. The label `high-blast-radius` lets operators filter PRs that need
-extra scrutiny.
+ Zero Go code. The label `high-blast-radius` lets operators filter PRs that need
+ extra scrutiny.
+
+---
+
+### FT-A11 — Tiered response system with infrastructure filtering
+
+**Problem:** Mechanic (mendabot) creates PR noise for infrastructure issues it can't fix
+(PR #1358: "no fix needed, it's infrastructure"). Investigations are wasted on pods
+running on unhealthy nodes (worker-02 NotReady). No distinction between GitOps-fixable
+issues vs infrastructure vs transient failures.
+
+**Proposed solution:** A tiered response system with three classification tiers:
+
+1. **Tier 1: Auto-fixable** (GitOps config issues) → Create PR
+2. **Tier 2: Infrastructure issues** (node failures, hardware) → Alert only, no PR
+3. **Tier 3: Transient/self-healing** → Suppress with short TTL
+
+**Key components:**
+- **Tier classification** based on error patterns (node failures, network issues vs config errors)
+- **Node health correlation** to skip investigations on `NotReady` nodes
+- **Infrastructure cascade detection** to group findings from failed nodes/namespaces
+- **Failure analysis CRD** to preserve artifacts for debugging failed jobs
+- **Smart PR management** with auto-close for infrastructure issues
+- **Enhanced metrics** for detection-to-fix timeline and success rates
+
+**Implementation notes:**
+- Add `tier` field to `Finding` struct (`auto-fixable`, `infrastructure`, `transient`)
+- Tier 2 findings create Kubernetes Events or Prometheus alerts instead of PRs
+- Simple rule-based classification (no ML initially)
+- All changes backward compatible with existing deployments
+- Feature flags for progressive rollout
+
+**Acceptance signal:** 50% reduction in PR noise for infrastructure issues, 30% reduction
+in wasted investigations via smart filtering.
+
+**Status:** Planned (epic29-mechanic-improvements)
 
 ---
 
@@ -1194,11 +1230,12 @@ product, the recommended implementation sequence (after epic09 is complete):
 | 8 | FT-U2 | Metrics make it possible to observe and tune accuracy objectively |
 | 9 | FT-A8 | Feedback annotations close the learning loop for persistent false positives |
 | 10 | FT-A4 | Cascade detection eliminates multi-Job noise from single root causes |
-| 11 | FT-A5 | Recurrence memory prevents redundant re-investigation of known failures |
-| 12 | FT-U8 | Dry-run mode enables safe evaluation on production clusters |
-| 13 | FT-P2 | cert-manager provider: high-value, low-complexity new signal source |
-| 14 | FT-I1 | PR/issue auto-close prevents stale sink accumulation as volume grows |
-| 15 | FT-I9 | Feedback iteration closes the human-agent review loop |
-| 16 | FT-I10 | Manual triggers unblock operator-initiated investigations |
-| 17 | FT-A6 | Multi-signal correlation (high value but complex; tackle after lower-hanging fruit) |
-| 18 | FT-P1 | Alertmanager provider: highest-value new source; tackle after core accuracy is solid |
+| 11 | FT-A11 | Tiered response system reduces PR noise for infrastructure issues |
+| 12 | FT-A5 | Recurrence memory prevents redundant re-investigation of known failures |
+| 13 | FT-U8 | Dry-run mode enables safe evaluation on production clusters |
+| 14 | FT-P2 | cert-manager provider: high-value, low-complexity new signal source |
+| 15 | FT-I1 | PR/issue auto-close prevents stale sink accumulation as volume grows |
+| 16 | FT-I9 | Feedback iteration closes the human-agent review loop |
+| 17 | FT-I10 | Manual triggers unblock operator-initiated investigations |
+| 18 | FT-A6 | Multi-signal correlation (high value but complex; tackle after lower-hanging fruit) |
+| 19 | FT-P1 | Alertmanager provider: highest-value new source; tackle after core accuracy is solid |

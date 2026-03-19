@@ -26,12 +26,12 @@ type Config struct {
 	DryRun              bool
 	HardenAgentKubectl  bool
 	ExtraRedactPatterns []string
-	// Resource limits applied to all three Job containers.
-	// Empty strings fall back to the package defaults (100m/128Mi/500m/512Mi).
-	CPURequest string
-	MemRequest string
-	CPULimit   string
-	MemLimit   string
+	// Resource requests/limits applied to all Job containers.
+	// nil means no request/limit is set for that dimension.
+	CPURequest *string
+	MemRequest *string
+	CPULimit   *string
+	MemLimit   *string
 }
 
 const defaultTTLSeconds int32 = 86400
@@ -50,36 +50,40 @@ func New(cfg Config) (*Builder, error) {
 	if cfg.TTLSeconds == 0 {
 		cfg.TTLSeconds = defaultTTLSeconds
 	}
-	// Apply resource limit defaults.
-	if cfg.CPURequest == "" {
-		cfg.CPURequest = "100m"
-	}
-	if cfg.MemRequest == "" {
-		cfg.MemRequest = "128Mi"
-	}
-	if cfg.CPULimit == "" {
-		cfg.CPULimit = "500m"
-	}
-	if cfg.MemLimit == "" {
-		cfg.MemLimit = "512Mi"
-	}
 	return &Builder{cfg: cfg}, nil
 }
 
-// containerResources returns a ResourceRequirements using the configured limits.
-// Quantity strings are validated by config.FromEnv before reaching here, so
-// MustParse will not panic in practice.
+// containerResources returns a ResourceRequirements populated from the optional
+// *string fields. Any nil field is simply omitted from the resulting lists.
+// If all four fields are nil an empty ResourceRequirements is returned (no
+// requests or limits stanza on the container).
 func (b *Builder) containerResources() corev1.ResourceRequirements {
-	return corev1.ResourceRequirements{
-		Requests: corev1.ResourceList{
-			corev1.ResourceCPU:    resource.MustParse(b.cfg.CPURequest),
-			corev1.ResourceMemory: resource.MustParse(b.cfg.MemRequest),
-		},
-		Limits: corev1.ResourceList{
-			corev1.ResourceCPU:    resource.MustParse(b.cfg.CPULimit),
-			corev1.ResourceMemory: resource.MustParse(b.cfg.MemLimit),
-		},
+	var reqs, limits corev1.ResourceList
+	if b.cfg.CPURequest != nil {
+		if reqs == nil {
+			reqs = corev1.ResourceList{}
+		}
+		reqs[corev1.ResourceCPU] = resource.MustParse(*b.cfg.CPURequest)
 	}
+	if b.cfg.MemRequest != nil {
+		if reqs == nil {
+			reqs = corev1.ResourceList{}
+		}
+		reqs[corev1.ResourceMemory] = resource.MustParse(*b.cfg.MemRequest)
+	}
+	if b.cfg.CPULimit != nil {
+		if limits == nil {
+			limits = corev1.ResourceList{}
+		}
+		limits[corev1.ResourceCPU] = resource.MustParse(*b.cfg.CPULimit)
+	}
+	if b.cfg.MemLimit != nil {
+		if limits == nil {
+			limits = corev1.ResourceList{}
+		}
+		limits[corev1.ResourceMemory] = resource.MustParse(*b.cfg.MemLimit)
+	}
+	return corev1.ResourceRequirements{Requests: reqs, Limits: limits}
 }
 
 func ptr[T any](v T) *T { return &v }

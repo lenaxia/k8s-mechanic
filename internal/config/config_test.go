@@ -1779,7 +1779,7 @@ func TestFromEnv_ResourceQuantities_ValidValues(t *testing.T) {
 		cpuLimit   string
 		memLimit   string
 	}{
-		{"defaults", "", "", "", ""},
+		{"all unset", "", "", "", ""},
 		{"explicit valid", "250m", "256Mi", "1", "1Gi"},
 		{"integer cpu", "2", "512Mi", "4", "2Gi"},
 		{"millicpu", "500m", "64Mi", "1000m", "128Mi"},
@@ -1847,18 +1847,18 @@ func TestFromEnv_ResourceQuantities_DefaultsAreValid(t *testing.T) {
 	os.Unsetenv("AGENT_MEM_LIMIT")
 	cfg, err := config.FromEnv()
 	if err != nil {
-		t.Fatalf("defaults should be valid quantities: %v", err)
+		t.Fatalf("unset resource env vars should produce no error: %v", err)
 	}
-	if cfg.AgentCPURequest != "100m" {
-		t.Errorf("AgentCPURequest default = %q, want %q", cfg.AgentCPURequest, "100m")
+	if cfg.AgentCPURequest != nil {
+		t.Errorf("AgentCPURequest should be nil when env var is unset, got %q", *cfg.AgentCPURequest)
 	}
-	if cfg.AgentMemRequest != "128Mi" {
-		t.Errorf("AgentMemRequest default = %q, want %q", cfg.AgentMemRequest, "128Mi")
+	if cfg.AgentMemRequest != nil {
+		t.Errorf("AgentMemRequest should be nil when env var is unset, got %q", *cfg.AgentMemRequest)
 	}
-	if cfg.AgentCPULimit != "500m" {
-		t.Errorf("AgentCPULimit default = %q, want %q", cfg.AgentCPULimit, "500m")
+	if cfg.AgentCPULimit != nil {
+		t.Errorf("AgentCPULimit should be nil when env var is unset, got %q", *cfg.AgentCPULimit)
 	}
-	if cfg.AgentMemLimit != "512Mi" {
-		t.Errorf("AgentMemLimit default = %q, want %q", cfg.AgentMemLimit, "512Mi")
+	if cfg.AgentMemLimit != nil {
+		t.Errorf("AgentMemLimit should be nil when env var is unset, got %q", *cfg.AgentMemLimit)
 	}
 }

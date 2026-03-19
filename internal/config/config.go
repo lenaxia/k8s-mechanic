@@ -94,13 +94,13 @@ type Config struct {
 	// Default: 86400 (24 hours).  Must be < RemediationJobTTLSeconds.
 	RemediationJobShortTTLSeconds int // REMEDIATION_JOB_SHORT_TTL_SECONDS — default 86400
 
-	// Agent Job resource limits. Applied to all three Job containers
+	// Agent Job resource requests/limits. Applied to all three Job containers
 	// (git-token-clone, dry-run-gate, mechanic-agent).
-	// Defaults are conservative; tune via Helm values or env vars.
-	AgentCPURequest string // AGENT_CPU_REQUEST    — default "100m"
-	AgentMemRequest string // AGENT_MEM_REQUEST    — default "128Mi"
-	AgentCPULimit   string // AGENT_CPU_LIMIT      — default "500m"
-	AgentMemLimit   string // AGENT_MEM_LIMIT      — default "512Mi"
+	// nil means no request/limit is set for that dimension (env var absent or empty).
+	AgentCPURequest *string // AGENT_CPU_REQUEST
+	AgentMemRequest *string // AGENT_MEM_REQUEST
+	AgentCPULimit   *string // AGENT_CPU_LIMIT
+	AgentMemLimit   *string // AGENT_MEM_LIMIT
 }
 
 // FromEnv reads configuration from environment variables and returns a Config.
@@ -409,28 +409,26 @@ func FromEnv() (Config, error) {
 		cfg.RemediationJobShortTTLSeconds = n
 	}
 
-	// Agent Job resource limits — applied to all Job containers.
-	// Values are validated at startup so that jobbuilder.Build never panics on
-	// a malformed quantity string (resource.MustParse panics, not errors).
-	type quantityField struct {
+	// Agent Job resource requests/limits — optional. When the env var is absent
+	// or empty the field is left nil and no request/limit is applied to Job containers.
+	for _, qf := range []struct {
 		envName string
-		dest    *string
-		def     string
-	}
-	for _, qf := range []quantityField{
-		{"AGENT_CPU_REQUEST", &cfg.AgentCPURequest, "100m"},
-		{"AGENT_MEM_REQUEST", &cfg.AgentMemRequest, "128Mi"},
-		{"AGENT_CPU_LIMIT", &cfg.AgentCPULimit, "500m"},
-		{"AGENT_MEM_LIMIT", &cfg.AgentMemLimit, "512Mi"},
+		dest    **string
+	}{
+		{"AGENT_CPU_REQUEST", &cfg.AgentCPURequest},
+		{"AGENT_MEM_REQUEST", &cfg.AgentMemRequest},
+		{"AGENT_CPU_LIMIT", &cfg.AgentCPULimit},
+		{"AGENT_MEM_LIMIT", &cfg.AgentMemLimit},
 	} {
 		val := os.Getenv(qf.envName)
 		if val == "" {
-			val = qf.def
+			continue
 		}
 		if _, err := parseQuantity(val); err != nil {
 			return Config{}, fmt.Errorf("%s %q is not a valid Kubernetes quantity: %w", qf.envName, val, err)
 		}
-		*qf.dest = val
+		v := val
+		*qf.dest = &v
 	}
 
 	return cfg, nil

@@ -127,14 +127,18 @@ spec:
               name: github-app
               key: installation-id
         {{- end }}
+        {{- with .Values.agent.resources.requests }}
         - name: AGENT_CPU_REQUEST
-          value: {{ .Values.agent.resources.requests.cpu | quote }}
+          value: {{ .cpu | quote }}
         - name: AGENT_MEM_REQUEST
-          value: {{ .Values.agent.resources.requests.memory | quote }}
+          value: {{ .memory | quote }}
+        {{- end }}
+        {{- with .Values.agent.resources.limits }}
         - name: AGENT_CPU_LIMIT
-          value: {{ .Values.agent.resources.limits.cpu | quote }}
+          value: {{ .cpu | quote }}
         - name: AGENT_MEM_LIMIT
-          value: {{ .Values.agent.resources.limits.memory | quote }}
+          value: {{ .memory | quote }}
+        {{- end }}
         ports:
         - name: metrics
           containerPort: 8080
@@ -154,8 +158,10 @@ spec:
             port: 8081
           initialDelaySeconds: 5
           periodSeconds: 10
+        {{- with .Values.watcher.resources }}
         resources:
-          {{- toYaml .Values.watcher.resources | nindent 10 }}
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
         securityContext:
           allowPrivilegeEscalation: false
           readOnlyRootFilesystem: true

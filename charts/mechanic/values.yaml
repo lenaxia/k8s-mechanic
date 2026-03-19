@@ -106,13 +106,15 @@ watcher:
     multiPodThreshold: 3
 
   # -- Resource requests and limits for the watcher Deployment container.
-  resources:
-    requests:
-      cpu: 50m
-      memory: 64Mi
-    limits:
-      cpu: 200m
-      memory: 128Mi
+  # Set to {} or omit individual sub-keys to apply no limits.
+  resources: {}
+  # resources:
+  #   requests:
+  #     cpu: 50m
+  #     memory: 64Mi
+  #   limits:
+  #     cpu: 200m
+  #     memory: 128Mi
 
 # ── Agent ─────────────────────────────────────────────────────────────────────
 
@@ -130,13 +132,15 @@ agent:
   type: opencode
 
   # -- Resource requests and limits applied to all agent Job containers.
-  resources:
-    requests:
-      cpu: 100m
-      memory: 128Mi
-    limits:
-      cpu: 500m
-      memory: 512Mi
+  # Set to {} or omit individual sub-keys to apply no limits.
+  resources: {}
+  # resources:
+  #   requests:
+  #     cpu: 100m
+  #     memory: 128Mi
+  #   limits:
+  #     cpu: 500m
+  #     memory: 512Mi
 
   # -- Investigation prompt overrides. When set, replaces the built-in prompts
   # mounted from the ConfigMap.

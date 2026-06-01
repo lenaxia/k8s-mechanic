@@ -1,7 +1,15 @@
 name: Renovate PR Analysis
 
 on:
-  pull_request_target:
+  # Renovate creates branches inside this repo (not forks), so the
+  # plain `pull_request` event is sufficient and avoids the security
+  # pitfalls of `pull_request_target` (executing untrusted PR code with
+  # the base-branch token). The opencode action also explicitly does not
+  # support `pull_request_target` — its SUPPORTED_EVENTS list only
+  # includes `pull_request`, `issues`, `issue_comment`,
+  # `pull_request_review_comment`, `schedule`, and `workflow_dispatch`.
+  # See: anomalyco/opencode packages/opencode/src/cli/cmd/github.ts
+  pull_request:
     types: [opened, synchronize, reopened]
   workflow_dispatch:
     inputs:
@@ -16,7 +24,8 @@ env:
 
 jobs:
   analyze-prs:
-    # Only run for Renovate PRs or manual triggers
+    # Only run for Renovate PRs (when triggered via pull_request) or any
+    # manual / scheduled trigger (workflow_dispatch).
     if: |
       github.event_name != 'pull_request' ||
       github.event.pull_request.user.login == 'renovate[bot]'

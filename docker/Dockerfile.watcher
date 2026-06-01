@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ── Build stage ──────────────────────────────────────────────────────────────
-FROM golang:1.25.7-bookworm@sha256:0b5f101af6e4f905da4e1c5885a76b1e7a9fbc97b1a41d971dbcab7be16e70a1 AS builder
+FROM golang:1.25.7-bookworm@sha256:564e366a28ad1d70f460a2b97d1d299a562f08707eb0ecb24b659e5bd6c108e1 AS builder
 
 ARG TARGETARCH=amd64
 ARG WATCHER_VERSION=dev

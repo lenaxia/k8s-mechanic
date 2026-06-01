@@ -1,6 +1,6 @@
 # mechanic
 
-![Version: 0.4.4](https://img.shields.io/badge/Version-0.4.4-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.4.4](https://img.shields.io/badge/AppVersion-v0.4.4-informational?style=flat-square)
+![Version: 0.4.5](https://img.shields.io/badge/Version-0.4.5-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.4.5](https://img.shields.io/badge/AppVersion-v0.4.5-informational?style=flat-square)
 
 Kubernetes-native SRE remediation bot — watches cluster failures, spawns an LLM agent, and opens GitOps pull requests with proposed fixes.
 
@@ -77,7 +77,7 @@ kubectl delete crd remediationjobs.remediation.mechanic.io
 | agent.rbac | object | `{"scope":"cluster","watchNamespaces":""}` | RBAC configuration for agent Jobs. |
 | agent.rbac.scope | string | `"cluster"` | RBAC scope for the agent Job. One of "cluster" (default) or "namespace". When "namespace", watchNamespaces must also be set. |
 | agent.rbac.watchNamespaces | string | `""` | Comma-separated list of namespaces the agent is permitted to read when scope is "namespace". Example: "production,staging". |
-| agent.resources | object | `{"limits":{"cpu":"500m","memory":"512Mi"},"requests":{"cpu":"100m","memory":"128Mi"}}` | Resource requests and limits applied to all agent Job containers. |
+| agent.resources | object | `{}` | Resource requests and limits applied to all agent Job containers. Set to {} or omit individual sub-keys to apply no limits. |
 | agent.security | object | `{"hardening":{"enabled":false,"extraRedactPatterns":[]},"kyverno":{"allowedImagePrefix":"ghcr.io/lenaxia/mechanic-agent","enabled":false},"networkPolicy":{"additionalEgressRules":[],"apiServerPort":6443,"enabled":false}}` | Security hardening for agent Jobs. |
 | agent.security.hardening | object | `{"enabled":false,"extraRedactPatterns":[]}` | Tool output redaction and kubectl restrictions. |
 | agent.security.hardening.enabled | bool | `false` | Block kubectl get/describe secret(s), get all, exec, and port-forward in agent Jobs. Off by default — disabling exec limits the agent's ability to inspect running containers. |
@@ -129,7 +129,7 @@ kubectl delete crd remediationjobs.remediation.mechanic.io
 | watcher.maxInvestigationRetries | int | `3` | Maximum number of investigation retries per RemediationJob before permanently failing. |
 | watcher.prAutoClose | bool | `true` | Automatically close open GitHub PRs when the underlying finding resolves. Set to false to leave PRs open for manual review. |
 | watcher.remediationJobTTLSeconds | int | `604800` | Time-to-live for completed RemediationJob objects in seconds. Default is 7 days. |
-| watcher.resources | object | `{"limits":{"cpu":"200m","memory":"128Mi"},"requests":{"cpu":"50m","memory":"64Mi"}}` | Resource requests and limits for the watcher Deployment container. |
+| watcher.resources | object | `{}` | Resource requests and limits for the watcher Deployment container. Set to {} or omit individual sub-keys to apply no limits. |
 | watcher.sinkType | string | `"github"` | Sink type for PR creation. Currently only "github" is supported. |
 | watcher.stabilisationWindowSeconds | int | `120` | Seconds to wait after first detecting a failure before creating a RemediationJob. Set to 0 to dispatch immediately. |
 | watcher.watchNamespaces | string | `""` | Comma-separated list of namespaces the watcher monitors for failures. Empty means all namespaces. |

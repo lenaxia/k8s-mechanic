@@ -27,7 +27,7 @@ RUN mkdir -p /out \
        go build -trimpath -o /out/redact ./cmd/redact
 
 # ── Runtime image ─────────────────────────────────────────────────────────────
-FROM debian:bookworm-slim@sha256:b29f74a267526ae6ea104eed6c46133b0ca70ce812525df8cd5817698f0a624a
+FROM debian:bookworm-slim@sha256:63a496b5d3b99214b39f5ed70eb71a61e590a77979c79cbee4faf991f8c0783e
 
 # Tool versions — bump these to upgrade
 ARG KUBECTL_VERSION=1.35.1

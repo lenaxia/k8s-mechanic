@@ -1,6 +1,6 @@
 agent:
   image:
-    tag: v0.4.4
+    tag: v0.4.6
   resources:
     limits:
       cpu: "1000m"
@@ -19,5 +19,5 @@ gitops:
   repo: lenaxia/talos-ops-prod
 watcher:
   image:
-    tag: v0.4.4
+    tag: v0.4.6
   prAutoClose: true

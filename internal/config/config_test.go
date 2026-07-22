@@ -1861,4 +1861,7 @@ func TestFromEnv_ResourceQuantities_DefaultsAreValid(t *testing.T) {
 	if cfg.AgentMemLimit != nil {
 		t.Errorf("AgentMemLimit should be nil when env var is unset, got %q", *cfg.AgentMemLimit)
 	}
+	if cfg.AgentActiveDeadlineSeconds != 1800 {
+		t.Errorf("AgentActiveDeadlineSeconds default = %d, want %d", cfg.AgentActiveDeadlineSeconds, 1800)
+	}
 }

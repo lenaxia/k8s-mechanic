@@ -27,6 +27,8 @@ annotations:
   artifacthub.io/changes: |
     - kind: changed
       description: "Resource requests and limits are now optional (default nil) for both watcher and agent — no limits are applied unless explicitly configured"
+    - kind: added
+      description: "AGENT_ACTIVE_DEADLINE_SECONDS env var makes agent Job timeout configurable via Helm (default 1800s)"
   artifacthub.io/containsSecurityUpdates: "true"
   artifacthub.io/recommendations: |
     - url: https://artifacthub.io/packages/helm/cert-manager/cert-manager

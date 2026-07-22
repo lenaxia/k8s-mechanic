@@ -197,7 +197,11 @@
             }
           }
         },
-        "rbac": {
+        "activeDeadlineSeconds": {
+          "type": "integer",
+          "minimum": 60,
+          "description": "Hard timeout in seconds for agent investigation Jobs."
+        },
           "type": "object",
           "additionalProperties": false,
           "properties": {

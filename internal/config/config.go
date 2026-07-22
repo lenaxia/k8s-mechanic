@@ -101,6 +101,10 @@ type Config struct {
 	AgentMemRequest *string // AGENT_MEM_REQUEST
 	AgentCPULimit   *string // AGENT_CPU_LIMIT
 	AgentMemLimit   *string // AGENT_MEM_LIMIT
+
+	// AgentActiveDeadlineSeconds is the hard timeout for agent Jobs.
+	// Default: 1800 (30 min).
+	AgentActiveDeadlineSeconds int64 // AGENT_ACTIVE_DEADLINE_SECONDS — default 1800
 }
 
 // FromEnv reads configuration from environment variables and returns a Config.
@@ -429,6 +433,21 @@ func FromEnv() (Config, error) {
 		}
 		v := val
 		*qf.dest = &v
+	}
+
+	// AGENT_ACTIVE_DEADLINE_SECONDS — default 1800 (30 min).
+	activeDeadlineStr := os.Getenv("AGENT_ACTIVE_DEADLINE_SECONDS")
+	if activeDeadlineStr == "" {
+		cfg.AgentActiveDeadlineSeconds = 1800
+	} else {
+		n, err := strconv.ParseInt(activeDeadlineStr, 10, 64)
+		if err != nil {
+			return Config{}, fmt.Errorf("AGENT_ACTIVE_DEADLINE_SECONDS must be an integer: %w", err)
+		}
+		if n <= 0 {
+			return Config{}, fmt.Errorf("AGENT_ACTIVE_DEADLINE_SECONDS must be a positive integer, got %d", n)
+		}
+		cfg.AgentActiveDeadlineSeconds = n
 	}
 
 	return cfg, nil

@@ -142,6 +142,11 @@ agent:
   #     cpu: 500m
   #     memory: 512Mi
 
+  # -- Hard timeout in seconds for agent investigation Jobs.
+  # Default is 1800 (30 minutes). Increase for complex investigations
+  # that require more LLM turns; decrease to fail faster on stuck agents.
+  activeDeadlineSeconds: 1800
+
   # -- Investigation prompt overrides. When set, replaces the built-in prompts
   # mounted from the ConfigMap.
   prompt:

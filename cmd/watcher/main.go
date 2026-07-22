@@ -120,16 +120,17 @@ func main() {
 	}
 
 	jb, err := jobbuilder.New(jobbuilder.Config{
-		AgentNamespace:      cfg.AgentNamespace,
-		AgentType:           cfg.AgentType,
-		TTLSeconds:          int32(cfg.RemediationJobTTLSeconds),
-		DryRun:              cfg.DryRun,
-		HardenAgentKubectl:  cfg.HardenAgentKubectl,
-		ExtraRedactPatterns: cfg.ExtraRedactPatterns,
-		CPURequest:          cfg.AgentCPURequest,
-		MemRequest:          cfg.AgentMemRequest,
-		CPULimit:            cfg.AgentCPULimit,
-		MemLimit:            cfg.AgentMemLimit,
+		AgentNamespace:        cfg.AgentNamespace,
+		AgentType:             cfg.AgentType,
+		TTLSeconds:            int32(cfg.RemediationJobTTLSeconds),
+		DryRun:                cfg.DryRun,
+		HardenAgentKubectl:    cfg.HardenAgentKubectl,
+		ExtraRedactPatterns:   cfg.ExtraRedactPatterns,
+		CPURequest:            cfg.AgentCPURequest,
+		MemRequest:            cfg.AgentMemRequest,
+		CPULimit:              cfg.AgentCPULimit,
+		MemLimit:              cfg.AgentMemLimit,
+		ActiveDeadlineSeconds: cfg.AgentActiveDeadlineSeconds,
 	})
 	if err != nil {
 		logger.Fatal("jobbuilder init failed", zap.Error(err))

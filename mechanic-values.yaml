@@ -1,0 +1,23 @@
+agent:
+  image:
+    tag: v0.4.4
+  resources:
+    limits:
+      cpu: "1000m"
+      memory: "2Gi"
+    requests:
+      cpu: 100m
+      memory: 256Mi
+  security:
+    hardening:
+      enabled: true
+    kyverno:
+      enabled: false
+  type: opencode
+gitops:
+  manifestRoot: kubernetes
+  repo: lenaxia/talos-ops-prod
+watcher:
+  image:
+    tag: v0.4.4
+  prAutoClose: true

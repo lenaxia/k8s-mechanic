@@ -139,6 +139,8 @@ spec:
         - name: AGENT_MEM_LIMIT
           value: {{ .memory | quote }}
         {{- end }}
+        - name: AGENT_ACTIVE_DEADLINE_SECONDS
+          value: {{ .Values.agent.activeDeadlineSeconds | quote }}
         ports:
         - name: metrics
           containerPort: 8080

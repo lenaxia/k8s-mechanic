@@ -429,8 +429,8 @@ func TestBuild_JobSettings(t *testing.T) {
 	if spec.BackoffLimit == nil || *spec.BackoffLimit != 1 {
 		t.Errorf("BackoffLimit = %v, want 1", spec.BackoffLimit)
 	}
-	if spec.ActiveDeadlineSeconds == nil || *spec.ActiveDeadlineSeconds != 900 {
-		t.Errorf("ActiveDeadlineSeconds = %v, want 900", spec.ActiveDeadlineSeconds)
+	if spec.ActiveDeadlineSeconds == nil || *spec.ActiveDeadlineSeconds != 1800 {
+		t.Errorf("ActiveDeadlineSeconds = %v, want 1800", spec.ActiveDeadlineSeconds)
 	}
 	if spec.TTLSecondsAfterFinished == nil || *spec.TTLSecondsAfterFinished != 86400 {
 		t.Errorf("TTLSecondsAfterFinished = %v, want 86400", spec.TTLSecondsAfterFinished)

@@ -32,9 +32,13 @@ type Config struct {
 	MemRequest *string
 	CPULimit   *string
 	MemLimit   *string
+	// ActiveDeadlineSeconds is the hard timeout for agent Jobs.
+	// Zero means use the default (1800 = 30 min).
+	ActiveDeadlineSeconds int64
 }
 
 const defaultTTLSeconds int32 = 86400
+const defaultActiveDeadlineSeconds int64 = 1800
 
 type Builder struct {
 	cfg Config
@@ -49,6 +53,9 @@ func New(cfg Config) (*Builder, error) {
 	}
 	if cfg.TTLSeconds == 0 {
 		cfg.TTLSeconds = defaultTTLSeconds
+	}
+	if cfg.ActiveDeadlineSeconds == 0 {
+		cfg.ActiveDeadlineSeconds = defaultActiveDeadlineSeconds
 	}
 	return &Builder{cfg: cfg}, nil
 }
@@ -422,7 +429,7 @@ func (b *Builder) Build(rjob *v1alpha1.RemediationJob, correlatedFindings []v1al
 		},
 		Spec: batchv1.JobSpec{
 			BackoffLimit:            ptr(int32(1)),
-			ActiveDeadlineSeconds:   ptr(int64(900)),
+			ActiveDeadlineSeconds:   ptr(b.cfg.ActiveDeadlineSeconds),
 			TTLSecondsAfterFinished: ptr(b.cfg.TTLSeconds),
 			Template: corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{

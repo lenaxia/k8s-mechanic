@@ -1,55 +1,28 @@
+# Issue Opened — thin caller delegating to the reusable workflow in
+# lenaxia/ai-workflows (issue-opened.yml). The reusable workflow runs the
+# issue-responder AI, posts the command footer, and configures git identity.
+#
+# Pinned to ai-workflows v0.2.9 — bump by editing the tag below (or via
+# propagate.yml in ai-workflows).
+#
+# Registered consumer: lenaxia/k8s-mechanic
+# (see ai-workflows/consumers/k8s-mechanic.yaml).
 name: Issue Opened
 
 on:
   issues:
     types: [opened]
 
+permissions:
+  id-token: write
+  contents: read
+  issues: write
+  pull-requests: write
+
 jobs:
   respond:
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
-      issues: write
-      pull-requests: write
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Run OpenCode
-        uses: anomalyco/opencode/github@0cf0294787322664c6d668fa5ab0a9ce26796f78 # github-v1.2.9
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_API_BASE: ${{ secrets.OPENAI_API_BASE }}
-          OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          model: openai-compatible/default
-          use_github_token: "true"
-          share: "false"
-          prompt: |
-            You are an AI assistant for the k8s-mechanic repository. A new GitHub issue has been opened. Analyze it and take the appropriate action.
-
-            Repository: k8s-mechanic — a Kubernetes operator (Go/controller-runtime) that watches cluster events, uses an LLM to diagnose issues, and optionally remediates them via RemediationJob CRDs. Single maintainer: @lenaxia.
-
-            Key directories:
-            - cmd/               — operator entrypoints
-            - internal/          — controller, agent, jobbuilder, redact wrappers
-            - api/               — CRD types (RemediationJob, MechanicConfig)
-            - charts/mechanic/   — Helm chart
-            - docs/              — architecture, security docs (THREAT_MODEL, pentest findings)
-            - docker/            — Dockerfiles, smoke/wrapper test scripts
-            - .github/workflows/ — CI/CD pipelines
-
-            Rules:
-            1. Always post a comment on the issue with your response before finishing.
-            2. For any code or file changes: create a feature branch and open a PR — never commit directly to main. Branch naming: feat/issue-{number}-<short-description>. PR body must include "Closes #{number}".
-            3. Never handle or create secrets.
-            4. Flag any change touching internal/redact/, RBAC, CRD schema, or secrets handling as security-sensitive.
-            5. If the request is ambiguous, ask for clarification in a comment rather than guessing.
-            6. Use the checked-out repository to read source files and understand current implementation before answering questions or proposing changes.
-
-            Analyze this issue, determine what action to take (answer a question, implement a change, ask for clarification), and execute it.
+    uses: lenaxia/ai-workflows/.github/workflows/issue-opened.yml@v0.2.9
+    secrets: inherit
+    with:
+      version: v0.2.9
+      project_name: k8s-mechanic

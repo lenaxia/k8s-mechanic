@@ -1,4 +1,17 @@
-name: AI Comment
+# AI Commands — thin caller delegating slash-command AI flows to the
+# reusable workflow in lenaxia/ai-workflows (ai-comment.yml).
+#
+# The command-token + author_association filter MUST live here (the caller) —
+# a called workflow's job-level `if:` against github.event.comment.* is not
+# reliably evaluated for issue_comment events (see ai-workflows README
+# Lessons Learned #4).
+#
+# Pinned to ai-workflows v0.2.9 — bump by editing the tag below (or via
+# propagate.yml in ai-workflows).
+#
+# Registered consumer: lenaxia/k8s-mechanic
+# (see ai-workflows/consumers/k8s-mechanic.yaml).
+name: AI Commands
 
 on:
   issue_comment:
@@ -6,36 +19,44 @@ on:
   pull_request_review_comment:
     types: [created]
 
+permissions:
+  id-token: write
+  contents: write
+  issues: write
+  pull-requests: write
+
 jobs:
   respond:
     if: |
       (startsWith(github.event.comment.body, '/ai') ||
-       contains(github.event.comment.body, ' /ai')) &&
+       startsWith(github.event.comment.body, '/review') ||
+       startsWith(github.event.comment.body, '/fix') ||
+       startsWith(github.event.comment.body, '/implement') ||
+       startsWith(github.event.comment.body, '/analyze') ||
+       startsWith(github.event.comment.body, '/test') ||
+       startsWith(github.event.comment.body, '/security') ||
+       startsWith(github.event.comment.body, '/explain') ||
+       startsWith(github.event.comment.body, '/triage') ||
+       startsWith(github.event.comment.body, '/help') ||
+       startsWith(github.event.comment.body, '/design') ||
+       startsWith(github.event.comment.body, '/merge') ||
+       contains(github.event.comment.body, ' /ai') ||
+       contains(github.event.comment.body, ' /review') ||
+       contains(github.event.comment.body, ' /fix') ||
+       contains(github.event.comment.body, ' /implement') ||
+       contains(github.event.comment.body, ' /analyze') ||
+       contains(github.event.comment.body, ' /test') ||
+       contains(github.event.comment.body, ' /security') ||
+       contains(github.event.comment.body, ' /explain') ||
+       contains(github.event.comment.body, ' /triage') ||
+       contains(github.event.comment.body, ' /help') ||
+       contains(github.event.comment.body, ' /design') ||
+       contains(github.event.comment.body, ' /merge')) &&
       (github.event.comment.author_association == 'OWNER' ||
        github.event.comment.author_association == 'MEMBER' ||
        github.event.comment.author_association == 'COLLABORATOR')
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: write
-      issues: write
-      pull-requests: write
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Run OpenCode
-        uses: anomalyco/opencode/github@0cf0294787322664c6d668fa5ab0a9ce26796f78 # github-v1.2.9
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_API_BASE: ${{ secrets.OPENAI_API_BASE }}
-          OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          model: openai-compatible/default
-          use_github_token: "true"
-          share: "false"
-          mentions: /ai
+    uses: lenaxia/ai-workflows/.github/workflows/ai-comment.yml@v0.2.9
+    secrets: inherit
+    with:
+      version: v0.2.9
+      project_name: k8s-mechanic

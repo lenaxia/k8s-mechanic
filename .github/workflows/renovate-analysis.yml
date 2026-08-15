@@ -1,15 +1,24 @@
-name: Renovate PR Analysis
-
-# Scheduled + manual batch analysis of Renovate PRs.
+# Renovate PR Analysis — thin caller delegating to the reusable
+# lenaxia/ai-workflows renovate-analysis workflow.
 #
-# Why not `pull_request`? The opencode action's assertPermissions() requires
-# the event actor (for pull_request events: the PR author) to be a repo
-# collaborator with write permission. renovate[bot] is an app bot account and
-# can never be a collaborator, so every pull_request-triggered run failed with
-# "User renovate[bot] does not have write permissions" before the AI could
-# analyze. schedule/workflow_dispatch are repo events — no actor — so the
-# permission assertion is skipped entirely. This mirrors the working
-# renovate-analysis.yml in lenaxia/talos-ops-prod.
+# Scheduled + manual batch analysis of Renovate PRs. The analysis logic,
+# prompt assembly, comment posting/verification, and safe-merge rules live in
+# the reusable workflow (lenaxia/ai-workflows/.github/workflows/renovate-analysis.yml)
+# and this repo's forked prompt (.github/prompts/renovate-analysis.md, which
+# carries the k8s-mechanic-specific exclusions — controller-runtime,
+# k8s.io/sigs.k8s.io, LLM/AI SDKs, bitnami).
+#
+# Why schedule/workflow_dispatch and NOT pull_request? The opencode action's
+# assertPermissions() requires the event actor (for pull_request events: the
+# PR author) to be a repo collaborator with write permission. renovate[bot]
+# is an app bot account and can never be a collaborator, so every
+# pull_request-triggered run failed with "User renovate[bot] does not have
+# write permissions" before the AI could analyze. schedule/workflow_dispatch
+# are repo events — no actor — so the permission assertion is skipped
+# entirely.
+#
+# The `uses:` ref MUST be a hardcoded tag (no vars context). propagate.yml in
+# ai-workflows bumps it on every release.
 on:
   schedule:
     # Every 2 hours — picks up newly-opened Renovate PRs and re-analyzes any
@@ -22,109 +31,16 @@ on:
         required: false
         type: string
 
-env:
-  OWNER: lenaxia
-  REPO: k8s-mechanic
+permissions:
+  id-token: write
+  contents: write
+  issues: write
+  pull-requests: write
 
 jobs:
   analyze-prs:
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: write
-      issues: write
-      pull-requests: write
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Run OpenCode
-        # Pinned to the same looser github-v1.2.x line as talos-ops-prod's
-        # renovate-analysis (76d814e, github-v1.2.24). The newer action lines
-        # enforce a strict "PR author must have repo write perms" check which
-        # fails for renovate[bot] on pull_request events; this line, combined
-        # with the schedule/dispatch triggers above (repo events — no actor),
-        # keeps the analysis working.
-        uses: anomalyco/opencode/github@76d814e7476c98dfc18b5cc51f959f6feae0ef9f # github-v1.2.24
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_API_BASE: ${{ secrets.OPENAI_API_BASE }}
-          OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          # Use the openai-compatible provider declared in /opencode.json
-          # (custom OPENAI_API_BASE). The model id is `default` which resolves
-          # to {env:OPENAI_MODEL} at runtime via the config file.
-          model: openai-compatible/default
-          use_github_token: "true"
-          share: "false"
-          prompt: |
-            You are an AI assistant that analyzes Renovatebot pull requests for k8s-mechanic, a Kubernetes operator (Go/controller-runtime) that watches cluster events, calls an LLM to diagnose issues, and optionally remediates them via RemediationJob CRDs.
-
-            Target PR (empty = find and analyze ALL open Renovate PRs): ${{ inputs.pr_number }}
-
-            Task: Analyze Renovate PR(s) and post a detailed report as a comment on EACH PR. Do NOT merge any PRs unless the recommendation is "Safe to merge".
-
-            Available tooling: bash shell with the gh CLI (gh pr, gh api, gh auth). There is NO github_merge_pull_request tool — to merge, use `gh pr merge <N> --squash`.
-
-            Discovery:
-            - If a target PR number is given, analyze only that PR.
-            - Otherwise list all open PRs whose author is `renovate[bot]` (or branch starts with `renovate/`). You MUST iterate through EVERY one of them — never stop after a single PR.
-            - For each PR, before doing any analysis, check whether the PR already has a comment authored by `github-actions[bot]` whose body starts with `## Renovate PR Analysis`. If the most-recent such comment was posted at or after the PR's `updatedAt` time, SKIP that PR — it is already analyzed and unchanged.
-
-            For each PR to analyze:
-
-            1. Parse the PR title: identify the dependency, version range (old → new), update type (patch/minor/major/digest).
-
-            2. Identify the upstream repository:
-               - Go modules: pkg.go.dev or the module's GitHub repo
-               - GitHub Actions: the action's repository
-               - Helm chart deps: Chart.yaml repository URL
-               - Check the PR body for links
-
-            3. Fetch release notes from upstream for the new version(s). For minor/major, fetch all versions between old and new.
-
-            4. Analyze impact on this codebase:
-               - Go modules: check import usage in internal/, api/, cmd/
-               - GitHub Actions: check .github/workflows/ usage
-               - Breaking changes? Deprecated APIs we use? New required params?
-
-            5. Post a comment on the PR using this exact structure:
-               ## Renovate PR Analysis
-               ### Update Summary
-               - Dependency: [name]
-               - Version: [old] → [new]
-               - Type: [patch/minor/major/digest]
-               ### Release Changes
-               [new features, bug fixes, security fixes]
-               ### Breaking Changes
-               [list, or "None affecting our usage"]
-               ### Code Changes Required
-               [specific changes needed, or "None"]
-               ### Security Impact
-               [security fixes and whether they affect our threat surface]
-               ### Recommendation
-               [Safe to merge / Needs manual review / Requires code changes] — [reason]
-
-            Posting the analysis (REQUIRED — do not skip this):
-            - You MUST actually post the comment. Never claim a comment was posted without running the command.
-            - Write the report to a file, e.g. `cat > /tmp/analysis-<N>.md <<'EOF' ... EOF` (cat is allowed), then post it:
-              `gh pr comment <N> --body-file /tmp/analysis-<N>.md`
-            - Verify it landed: `gh api "repos/lenaxia/k8s-mechanic/issues/<N>/comments" --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | startswith("## Renovate PR Analysis"))) | .html_url'` — if empty, post again until it appears.
-            - Process the PRs one at a time, in order, posting and verifying each comment before moving to the next. When all are done, summarize the posted comment URLs.
-
-            6. Act on the recommendation (after the analysis comment is posted):
-               - Safe to merge: merge with `gh pr merge <N> --squash`
-               - Requires code changes: create branch config/renovate-pr-{number}-changes, make changes, open a PR, comment on the Renovate PR with the link
-               - Needs manual review: post comment only, do NOT merge
-
-            Special exclusions (always "Needs manual review", never auto-merge):
-            - sigs.k8s.io/controller-runtime — core reconcile loop framework
-            - k8s.io/* / sigs.k8s.io/* — Kubernetes API clients
-            - Any LLM/AI SDK — affects prompt handling and response parsing
-            - github.com/bitnami/* — revoked open-source license
-
-            Skip PRs with "abandoned" in the title.
+    uses: lenaxia/ai-workflows/.github/workflows/renovate-analysis.yml@v0.2.10
+    secrets: inherit
+    with:
+      project_name: k8s-mechanic
+      pr_number: ${{ inputs.pr_number }}

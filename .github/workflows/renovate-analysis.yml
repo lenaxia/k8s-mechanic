@@ -64,13 +64,15 @@ jobs:
           prompt: |
             You are an AI assistant that analyzes Renovatebot pull requests for k8s-mechanic, a Kubernetes operator (Go/controller-runtime) that watches cluster events, calls an LLM to diagnose issues, and optionally remediates them via RemediationJob CRDs.
 
-            Target PR (empty = find and analyze all open Renovate PRs): ${{ inputs.pr_number }}
+            Target PR (empty = find and analyze ALL open Renovate PRs): ${{ inputs.pr_number }}
 
-            Task: Analyze Renovate PR(s) and post a detailed report as a PR comment. Do NOT merge any PRs.
+            Task: Analyze Renovate PR(s) and post a detailed report as a comment on EACH PR. Do NOT merge any PRs unless the recommendation is "Safe to merge".
+
+            Available tooling: bash shell with the gh CLI (gh pr, gh api, gh auth). There is NO github_merge_pull_request tool — to merge, use `gh pr merge <N> --squash`.
 
             Discovery:
-            - If a target PR number is given, fetch only that PR.
-            - Otherwise list all open PRs whose author is `renovate[bot]` (or branch starts with `renovate/`).
+            - If a target PR number is given, analyze only that PR.
+            - Otherwise list all open PRs whose author is `renovate[bot]` (or branch starts with `renovate/`). You MUST iterate through EVERY one of them — never stop after a single PR.
             - For each PR, before doing any analysis, check whether the PR already has a comment authored by `github-actions[bot]` whose body starts with `## Renovate PR Analysis`. If the most-recent such comment was posted at or after the PR's `updatedAt` time, SKIP that PR — it is already analyzed and unchanged.
 
             For each PR to analyze:
@@ -107,8 +109,15 @@ jobs:
                ### Recommendation
                [Safe to merge / Needs manual review / Requires code changes] — [reason]
 
-            6. Act on the recommendation:
-               - Safe to merge: merge with squash method (github_merge_pull_request)
+            Posting the analysis (REQUIRED — do not skip this):
+            - You MUST actually post the comment. Never claim a comment was posted without running the command.
+            - Write the report to a file, e.g. `cat > /tmp/analysis-<N>.md <<'EOF' ... EOF` (cat is allowed), then post it:
+              `gh pr comment <N> --body-file /tmp/analysis-<N>.md`
+            - Verify it landed: `gh api "repos/lenaxia/k8s-mechanic/issues/<N>/comments" --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | startswith("## Renovate PR Analysis"))) | .html_url'` — if empty, post again until it appears.
+            - Process the PRs one at a time, in order, posting and verifying each comment before moving to the next. When all are done, summarize the posted comment URLs.
+
+            6. Act on the recommendation (after the analysis comment is posted):
+               - Safe to merge: merge with `gh pr merge <N> --squash`
                - Requires code changes: create branch config/renovate-pr-{number}-changes, make changes, open a PR, comment on the Renovate PR with the link
                - Needs manual review: post comment only, do NOT merge
 

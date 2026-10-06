@@ -27,7 +27,7 @@ RUN mkdir -p /out \
       ./cmd/watcher
 
 # ── Runtime stage ────────────────────────────────────────────────────────────
-FROM debian:bookworm-slim@sha256:f3034a6ec3c1205360777c4aae76234998866ad18806ae62b63a3f84ccad782b
+FROM debian:bookworm-slim@sha256:a4672c0cb26fbdde88e38fa2dfb6c681942306680e41e4378b28770b6e79ee91
 
 # Install only CA certificates (required for the in-cluster API server TLS connection
 # and for calling the Kubernetes API using the ServiceAccount token).

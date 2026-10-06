@@ -2,7 +2,7 @@
 # Use go build -o to an explicit /out dir so the binary lands in a fixed path
 # regardless of cross-compilation (go install puts cross-compiled binaries in
 # $GOPATH/bin/${GOOS}_${GOARCH}/ which breaks COPY --from on multi-arch builds).
-FROM golang:1.27.1-bookworm@sha256:6e725de5c0593b829d80b04f169d4fe119b32c612744c79e3311acf14b738e7f AS age-builder
+FROM golang:1.27.1-bookworm@sha256:a4f46dc39c6b0359a3e1ed86ef14d01b374cc808649679dd5fca2290e6d54202 AS age-builder
 ARG AGE_VERSION=1.3.1
 ARG TARGETARCH=amd64
 RUN mkdir -p /out /build \
@@ -16,7 +16,7 @@ RUN mkdir -p /out /build \
        go build -trimpath -o /out/age-keygen filippo.io/age/cmd/age-keygen
 
 # ── redact build stage — compiles cmd/redact filter binary ──────────────────
-FROM golang:1.27.1-bookworm@sha256:6e725de5c0593b829d80b04f169d4fe119b32c612744c79e3311acf14b738e7f AS redact-builder
+FROM golang:1.27.1-bookworm@sha256:a4f46dc39c6b0359a3e1ed86ef14d01b374cc808649679dd5fca2290e6d54202 AS redact-builder
 ARG TARGETARCH=amd64
 WORKDIR /src
 COPY go.mod go.sum ./

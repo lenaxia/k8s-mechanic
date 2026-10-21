@@ -21,7 +21,7 @@ permissions:
 
 jobs:
   respond:
-    uses: lenaxia/ai-workflows/.github/workflows/issue-opened.yml@v0.2.21
+    uses: lenaxia/ai-workflows/.github/workflows/issue-opened.yml@v0.2.22
     secrets: inherit
     with:
       version: v0.2.9

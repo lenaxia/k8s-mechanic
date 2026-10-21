@@ -39,7 +39,7 @@ permissions:
 
 jobs:
   analyze-prs:
-    uses: lenaxia/ai-workflows/.github/workflows/renovate-analysis.yml@v0.2.21
+    uses: lenaxia/ai-workflows/.github/workflows/renovate-analysis.yml@v0.2.22
     secrets: inherit
     with:
       project_name: k8s-mechanic

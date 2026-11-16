@@ -233,6 +233,8 @@ Parser rules: `round:`/`head:`/`lane:`/`verdict:` come from the injected context
 finding: id=nil-session-deref; class=correctness; anchor=issue:3; pointer=internal/bot/session.go:217; status=new; risk=nil session deref crashes the bot on reconnect; fix_cost=guard clause + TestSession_NilOnReconnect
 ```
 
+**The marker lines are plain text, never markdown headings.** `REVIEW-LEDGER v1` and `END-REVIEW-LEDGER` go out bare, exactly as shown in the block above — never prefix either line with `#` heading syntax, not even `##`. `## REVIEW-LEDGER v1` was the 8/8 rejection cause on LLMSafeSpaces PR #2077 (issue #80): the validator now tolerates a heading-prefixed marker only as a compatibility fallback, but the bare line is the contract, and the only `##` headings in your verdict body are `## Findings`, `## Coverage`, and `## Summary`.
+
 ## Verdict body (trimmed — this is the whole format)
 
 23% of the old reviewer turn went to a mandatory ten-section essay (Correctness/Architecture/Tests/Robustness/Type Safety/Security/Alignment/Style/…) per verdict. That format is deleted. The body is exactly:
